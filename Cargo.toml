@@ -1,0 +1,8 @@
+[package]
+name = "json-db"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.40.0", features = ["full"] }
+futures = { version = "0.3.30" }
