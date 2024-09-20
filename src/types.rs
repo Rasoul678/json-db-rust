@@ -24,5 +24,5 @@ pub struct JsonContent {
 #[derive(Debug)]
 pub enum Data {
     SingleTodo(ToDo),
-    ListOfTodo(Vec<ToDo>),
+    ListOfTodos(Vec<ToDo>),
 }
