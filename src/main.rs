@@ -36,7 +36,11 @@ async fn main() {
     // let deleted_by_id = my_db.delete_by_id(id).await.unwrap();
     // println!("{:#?}", deleted_by_id);
 
-    // my_db.delete_archived().run().await;
+    let deleted_arch = my_db.delete_archived().run().await;
+    println!("{:#?}", deleted_arch);
+
+    let deleted_com = my_db.delete_completed().run().await;
+    println!("{:#?}", deleted_com);
 
     // my_db.delete_not_completed().await.unwrap();
 }

@@ -12,6 +12,7 @@ enum Runner {
     Done,
     GetByID(String),
     DeleteArchived,
+    DeleteCompleted,
 }
 
 #[derive(Clone)]
@@ -129,6 +130,11 @@ impl JsonDB {
             .ok_or(io::Error::new(ErrorKind::NotFound, "Record not found"))?;
 
         self.value = Arc::new(vec![todo]);
+        /*
+         * Setting runner to Done is crucial
+         * to prevent a loop in the `run` method.
+         */
+        self.runner = Arc::new(Runner::Done);
 
         Ok(self)
     }
@@ -179,25 +185,56 @@ impl JsonDB {
         self.clear().await
     }
 
-    pub async fn delete_completed(&self) -> Result<(), io::Error> {
+    pub async fn delete_completed_runner(&mut self) -> Result<&Self, io::Error> {
         let mut content = self.read().await?;
+        let deleted_todos = content
+            .todos
+            .iter()
+            .filter(|todo| match todo.status {
+                Status::Completed => true,
+                _ => false,
+            })
+            .cloned()
+            .collect::<Vec<ToDo>>();
+
         content.todos.retain(|todo| match todo.status {
             Status::Completed => false,
             _ => true,
         });
 
         self.save(content).await?;
-        Ok(())
+        self.value = Arc::new(deleted_todos);
+        self.runner = Arc::new(Runner::Done);
+        Ok(self)
+    }
+
+    pub fn delete_completed(&self) -> Self {
+        Self {
+            runner: Arc::new(Runner::DeleteCompleted),
+            ..self.clone()
+        }
     }
 
     pub async fn delete_archived_runner(&mut self) -> Result<&Self, io::Error> {
         let mut content = self.read().await?;
+        let deleted_todos = content
+            .todos
+            .iter()
+            .filter(|todo| match todo.status {
+                Status::Archived => true,
+                _ => false,
+            })
+            .cloned()
+            .collect::<Vec<ToDo>>();
+
         content.todos.retain(|todo| match todo.status {
             Status::Archived => false,
             _ => true,
         });
 
         self.save(content).await?;
+        self.value = Arc::new(deleted_todos);
+        self.runner = Arc::new(Runner::Done);
         Ok(self)
     }
     pub fn delete_archived(&self) -> Self {
@@ -236,11 +273,15 @@ impl JsonDB {
     pub async fn run(&mut self) -> Arc<Vec<ToDo>> {
         match (*self.runner).clone() {
             Runner::GetByID(ref id) => match self.get_by_id_runner(id).await {
-                Ok(_) => self.value.clone(),
+                Ok(_) => Box::pin(self.run()).await,
                 Err(_) => Arc::new(vec![]),
             },
             Runner::DeleteArchived => match self.delete_archived_runner().await {
-                Ok(db) => db.value.clone(),
+                Ok(_) => Box::pin(self.run()).await,
+                Err(_) => Arc::new(vec![]),
+            },
+            Runner::DeleteCompleted => match self.delete_completed_runner().await {
+                Ok(_) => Box::pin(self.run()).await,
                 Err(_) => Arc::new(vec![]),
             },
             Runner::Done => {
