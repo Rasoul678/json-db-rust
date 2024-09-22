@@ -1,13 +1,26 @@
+#![allow(dead_code)]
+
 use crate::types::{JsonContent, Status, ToDo};
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[derive(Clone)]
+enum Runner {
+    Done,
+    GetByID(String),
+    DeleteArchived,
+}
+
+#[derive(Clone)]
 pub struct JsonDB {
     name: String,
     path: PathBuf,
-    file: File,
+    file: Arc<File>,
+    value: Arc<Vec<ToDo>>,
+    runner: Arc<Runner>,
 }
 
 impl JsonDB {
@@ -27,10 +40,12 @@ impl JsonDB {
         //? Write into the file
         json_db_file.write_all(b"{\"todos\":[]}").await?;
 
-        let db: JsonDB = Self {
+        let db = Self {
             name: db_name.to_string(),
             path,
-            file: json_db_file,
+            file: json_db_file.into(),
+            value: Arc::new(vec![]),
+            runner: Arc::new(Runner::Done),
         };
 
         Ok(db)
@@ -105,14 +120,24 @@ impl JsonDB {
         Ok(todos)
     }
 
-    pub async fn get_by_id(&self, id: &str) -> Result<ToDo, io::Error> {
+    async fn get_by_id_runner(&mut self, id: &str) -> Result<&Self, io::Error> {
         let content = self.read().await?;
         let todo = content
             .todos
             .into_iter()
             .find(|todo| todo.id == id)
             .ok_or(io::Error::new(ErrorKind::NotFound, "Record not found"))?;
-        Ok(todo)
+
+        self.value = Arc::new(vec![todo]);
+
+        Ok(self)
+    }
+
+    pub fn get_by_id(&self, id: &str) -> Self {
+        Self {
+            runner: Arc::new(Runner::GetByID(id.to_string())),
+            ..self.clone()
+        }
     }
 
     pub async fn update(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
@@ -165,7 +190,7 @@ impl JsonDB {
         Ok(())
     }
 
-    pub async fn delete_archived(&self) -> Result<(), io::Error> {
+    pub async fn delete_archived_runner(&mut self) -> Result<&Self, io::Error> {
         let mut content = self.read().await?;
         content.todos.retain(|todo| match todo.status {
             Status::Archived => false,
@@ -173,7 +198,13 @@ impl JsonDB {
         });
 
         self.save(content).await?;
-        Ok(())
+        Ok(self)
+    }
+    pub fn delete_archived(&self) -> Self {
+        Self {
+            runner: Arc::new(Runner::DeleteArchived),
+            ..self.clone()
+        }
     }
 
     pub async fn delete_not_completed(&self) -> Result<(), io::Error> {
@@ -202,7 +233,20 @@ impl JsonDB {
         Ok(deleted_todos)
     }
 
-    pub fn pipe(self) -> Self {
-        self
+    pub async fn run(&mut self) -> Arc<Vec<ToDo>> {
+        match (*self.runner).clone() {
+            Runner::GetByID(ref id) => match self.get_by_id_runner(id).await {
+                Ok(_) => self.value.clone(),
+                Err(_) => Arc::new(vec![]),
+            },
+            Runner::DeleteArchived => match self.delete_archived_runner().await {
+                Ok(db) => db.value.clone(),
+                Err(_) => Arc::new(vec![]),
+            },
+            Runner::Done => {
+                println!("***Runner is done***");
+                self.value.clone()
+            }
+        }
     }
 }

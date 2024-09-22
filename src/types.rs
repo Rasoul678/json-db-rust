@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use fake::Dummy;
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +13,16 @@ pub enum Status {
 #[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
 pub struct ToDo {
     pub id: String,
-    pub name: String,
+    pub text: String,
     pub status: Status,
     pub user: String,
+    pub date: Date,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+pub struct Date {
+    pub start: String,
+    pub end: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
