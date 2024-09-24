@@ -1,4 +1,5 @@
 #![allow(unused_variables)]
+
 use json_db::{fake_it, get_nested_value, Date, JsonDB, Name, Status, ToDo, User};
 use serde_json::Value;
 
@@ -18,14 +19,14 @@ async fn main() {
         status: Status::Pending,
         user: User {
             name: Name {
-                first: "John".to_string(),
-                last: "Doe".to_string(),
+                first: "Rasoul".to_string(),
+                last: "Hesami".to_string(),
             },
-            email: "john.doe@example.com".to_string(),
+            email: "rasoul.hesami@gmail.com".to_string(),
         },
         date: Date {
             start: "2023-01-01".to_string(),
-            end: "2023-01-01".to_string(),
+            end: "2025-01-01".to_string(),
         },
     };
 
@@ -43,7 +44,7 @@ async fn main() {
     let found = my_db
         .find()
         ._where("user.name.first")
-        .equals("John")
+        .equals("Rasoul")
         .run()
         .await
         .unwrap();

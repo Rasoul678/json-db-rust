@@ -3,13 +3,14 @@
 use crate::get_nested_value;
 use crate::types::{JsonContent, Status, ToDo};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 enum Comparator {
     Equals(String),
     NotEquals(String),
@@ -18,18 +19,18 @@ enum Comparator {
     In(Vec<String>),
 }
 
-#[derive(Clone, PartialEq)]
-enum CType {
+#[derive(Clone, PartialEq, Debug)]
+enum CallerType {
     Create,
     Read,
     Update,
     Delete,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 enum Runner {
     Done,
-    Caller(CType),
+    Caller(CallerType),
     Compare(Comparator),
     Where(String),
 }
@@ -40,8 +41,7 @@ pub struct JsonDB {
     path: PathBuf,
     file: Arc<File>,
     value: Arc<Vec<ToDo>>,
-    runner: Arc<Runner>,
-    needle: String,
+    runners: Arc<VecDeque<Runner>>,
 }
 
 impl JsonDB {
@@ -66,8 +66,7 @@ impl JsonDB {
             path,
             file: json_db_file.into(),
             value: Arc::new(vec![]),
-            runner: Arc::new(Runner::Done),
-            needle: "".to_string(),
+            runners: Arc::new(VecDeque::new()),
         };
 
         Ok(db)
@@ -165,13 +164,11 @@ impl JsonDB {
         Ok(self)
     }
 
-    pub fn get_by_id(&self, id: &str) -> Self {
-        Self {
-            runner: Arc::new(Runner::Caller(CType::Read)),
-            ..self.clone()
-        }
+    pub fn get_by_id(&mut self) -> &Self {
+        let runners = Arc::make_mut(&mut self.runners);
+        runners.push_front(Runner::Caller(CallerType::Read));
+        self
     }
-
     pub async fn update(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
         let mut content = self.read().await?;
         let todo_index = content
@@ -234,11 +231,10 @@ impl JsonDB {
         Ok(self)
     }
 
-    pub fn delete_completed(&self) -> Self {
-        Self {
-            runner: Arc::new(Runner::Done),
-            ..self.clone()
-        }
+    pub fn delete_completed(&mut self) -> &Self {
+        let runners = Arc::make_mut(&mut self.runners);
+        runners.push_front(Runner::Caller(CallerType::Read));
+        self
     }
 
     pub async fn delete_archived_runner(&mut self) -> Result<&Self, io::Error> {
@@ -263,11 +259,10 @@ impl JsonDB {
         // self.runner = Arc::new(Runner::Done);
         Ok(self)
     }
-    pub fn delete_archived(&self) -> Self {
-        Self {
-            runner: Arc::new(Runner::Done),
-            ..self.clone()
-        }
+    pub fn delete_archived(&mut self) -> &Self {
+        let runners = Arc::make_mut(&mut self.runners);
+        runners.push_front(Runner::Caller(CallerType::Read));
+        self
     }
 
     pub async fn delete_not_completed(&self) -> Result<(), io::Error> {
@@ -297,30 +292,41 @@ impl JsonDB {
     }
 
     pub fn find(&self) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Caller(CallerType::Read));
+
         Self {
-            runner: Arc::new(Runner::Caller(CType::Read)),
+            runners: Arc::new(runners.clone()),
             ..self.clone()
         }
     }
 
     pub fn _where(&self, field: &str) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Where(field.to_string()));
+
         Self {
-            runner: Arc::new(Runner::Where(field.to_string())),
-            needle: field.to_string(),
+            runners: Arc::new(runners.clone()),
             ..self.clone()
         }
     }
 
     pub fn equals(&self, value: &str) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Compare(Comparator::Equals(value.to_string())));
+
         Self {
-            runner: Arc::new(Runner::Compare(Comparator::Equals(value.to_string()))),
+            runners: Arc::new(runners.clone()),
             ..self.clone()
         }
     }
 
     pub fn not_equals(&self, value: &str) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Compare(Comparator::NotEquals(value.to_string())));
+
         Self {
-            runner: Arc::new(Runner::Compare(Comparator::NotEquals(value.to_string()))),
+            runners: Arc::new(runners.clone()),
             ..self.clone()
         }
     }
@@ -332,37 +338,49 @@ impl JsonDB {
     }
 
     pub async fn run(&mut self) -> Result<Arc<Vec<ToDo>>, std::io::Error> {
-        match (*self.runner).clone() {
-            Runner::Caller(_c_type) => Ok(Arc::new(vec![])),
-            Runner::Where(_) => Ok(Arc::new(vec![])),
-            Runner::Compare(comparator) => match comparator {
-                Comparator::Equals(to) => {
-                    let todos = self.equal_or_not(&to, true).await;
-                    Ok(Arc::new(todos))
+        let runners = VecDeque::from(self.runners.as_ref().clone());
+        let mut key_chain = String::new();
+
+        for runner in runners {
+            if let Runner::Caller(ref c) = runner {
+                if let CallerType::Read = c {
+                    continue;
                 }
-                Comparator::NotEquals(to) => {
-                    let todos = self.equal_or_not(&to, false).await;
-                    Ok(Arc::new(todos))
+            }
+
+            if let Runner::Where(ref w) = runner {
+                key_chain.push_str(w);
+                continue;
+            }
+
+            if let Runner::Compare(ref cmp) = runner {
+                if let Comparator::Equals(to) = cmp {
+                    let todos = self.equal_or_not(&to, &key_chain, true).await;
+                    return Ok(Arc::new(todos));
                 }
-                Comparator::LessThan(_) => Ok(Arc::new(vec![])),
-                Comparator::GreaterThan(_) => Ok(Arc::new(vec![])),
-                Comparator::In(_) => Ok(Arc::new(vec![])),
-            },
-            Runner::Done => {
-                println!("***Runner is done***");
-                Ok(self.value.clone())
+
+                if let Comparator::NotEquals(to) = cmp {
+                    let todos = self.equal_or_not(&to, &key_chain, false).await;
+                    return Ok(Arc::new(todos));
+                }
+            }
+
+            if let Runner::Done = runner {
+                return Ok(self.value.clone());
             }
         }
+
+        Ok(self.value.clone())
     }
 
     // Runners
-    async fn equal_or_not(&self, to: &str, flag: bool) -> Vec<ToDo> {
+    async fn equal_or_not(&self, to: &str, key_chain: &str, flag: bool) -> Vec<ToDo> {
         let todos = self.get_all().await.unwrap();
 
         todos
             .iter()
-            .filter(|todo| {
-                let value: Value = get_nested_value(todo, &self.needle).unwrap();
+            .filter(|data| {
+                let value: Value = get_nested_value(data, key_chain).unwrap();
                 match value {
                     Value::String(str_val) => {
                         if flag {
