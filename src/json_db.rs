@@ -1,18 +1,37 @@
 #![allow(dead_code)]
 
+use crate::get_nested_value;
 use crate::types::{JsonContent, Status, ToDo};
+use serde_json::Value;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
+enum Comparator {
+    Equals(String),
+    NotEquals(String),
+    LessThan(usize),
+    GreaterThan(usize),
+    In(Vec<String>),
+}
+
+#[derive(Clone, PartialEq)]
+enum CType {
+    Create,
+    Read,
+    Update,
+    Delete,
+}
+
+#[derive(Clone, PartialEq)]
 enum Runner {
     Done,
-    GetByID(String),
-    DeleteArchived,
-    DeleteCompleted,
+    Caller(CType),
+    Compare(Comparator),
+    Where(String),
 }
 
 #[derive(Clone)]
@@ -22,6 +41,7 @@ pub struct JsonDB {
     file: Arc<File>,
     value: Arc<Vec<ToDo>>,
     runner: Arc<Runner>,
+    needle: String,
 }
 
 impl JsonDB {
@@ -47,6 +67,7 @@ impl JsonDB {
             file: json_db_file.into(),
             value: Arc::new(vec![]),
             runner: Arc::new(Runner::Done),
+            needle: "".to_string(),
         };
 
         Ok(db)
@@ -106,9 +127,14 @@ impl JsonDB {
         Ok(item)
     }
 
-    pub async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
+    async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
         let content = self.read().await?;
         Ok(content.todos)
+    }
+
+    pub async fn find_all(&self) -> Result<Vec<ToDo>, io::Error> {
+        let todos = self.get_all().await?;
+        Ok(todos)
     }
 
     pub async fn get_by_ids(&self, ids: &[&str]) -> Result<Vec<ToDo>, io::Error> {
@@ -134,14 +160,14 @@ impl JsonDB {
          * Setting runner to Done is crucial
          * to prevent a loop in the `run` method.
          */
-        self.runner = Arc::new(Runner::Done);
+        // self.runner = Arc::new(Runner::Done);
 
         Ok(self)
     }
 
     pub fn get_by_id(&self, id: &str) -> Self {
         Self {
-            runner: Arc::new(Runner::GetByID(id.to_string())),
+            runner: Arc::new(Runner::Caller(CType::Read)),
             ..self.clone()
         }
     }
@@ -204,13 +230,13 @@ impl JsonDB {
 
         self.save(content).await?;
         self.value = Arc::new(deleted_todos);
-        self.runner = Arc::new(Runner::Done);
+        // self.runner = Arc::new(Runner::Done);
         Ok(self)
     }
 
     pub fn delete_completed(&self) -> Self {
         Self {
-            runner: Arc::new(Runner::DeleteCompleted),
+            runner: Arc::new(Runner::Done),
             ..self.clone()
         }
     }
@@ -234,12 +260,12 @@ impl JsonDB {
 
         self.save(content).await?;
         self.value = Arc::new(deleted_todos);
-        self.runner = Arc::new(Runner::Done);
+        // self.runner = Arc::new(Runner::Done);
         Ok(self)
     }
     pub fn delete_archived(&self) -> Self {
         Self {
-            runner: Arc::new(Runner::DeleteArchived),
+            runner: Arc::new(Runner::Done),
             ..self.clone()
         }
     }
@@ -270,24 +296,85 @@ impl JsonDB {
         Ok(deleted_todos)
     }
 
-    pub async fn run(&mut self) -> Arc<Vec<ToDo>> {
+    pub fn find(&self) -> Self {
+        Self {
+            runner: Arc::new(Runner::Caller(CType::Read)),
+            ..self.clone()
+        }
+    }
+
+    pub fn _where(&self, field: &str) -> Self {
+        Self {
+            runner: Arc::new(Runner::Where(field.to_string())),
+            needle: field.to_string(),
+            ..self.clone()
+        }
+    }
+
+    pub fn equals(&self, value: &str) -> Self {
+        Self {
+            runner: Arc::new(Runner::Compare(Comparator::Equals(value.to_string()))),
+            ..self.clone()
+        }
+    }
+
+    pub fn not_equals(&self, value: &str) -> Self {
+        Self {
+            runner: Arc::new(Runner::Compare(Comparator::NotEquals(value.to_string()))),
+            ..self.clone()
+        }
+    }
+
+    pub async fn execute(&self) -> Result<Option<ToDo>, io::Error> {
+        let content = self.read().await?;
+        let todo = content.todos.into_iter().next();
+        Ok(todo)
+    }
+
+    pub async fn run(&mut self) -> Result<Arc<Vec<ToDo>>, std::io::Error> {
         match (*self.runner).clone() {
-            Runner::GetByID(ref id) => match self.get_by_id_runner(id).await {
-                Ok(_) => Box::pin(self.run()).await,
-                Err(_) => Arc::new(vec![]),
-            },
-            Runner::DeleteArchived => match self.delete_archived_runner().await {
-                Ok(_) => Box::pin(self.run()).await,
-                Err(_) => Arc::new(vec![]),
-            },
-            Runner::DeleteCompleted => match self.delete_completed_runner().await {
-                Ok(_) => Box::pin(self.run()).await,
-                Err(_) => Arc::new(vec![]),
+            Runner::Caller(_c_type) => Ok(Arc::new(vec![])),
+            Runner::Where(_) => Ok(Arc::new(vec![])),
+            Runner::Compare(comparator) => match comparator {
+                Comparator::Equals(to) => {
+                    let todos = self.equal_or_not(&to, true).await;
+                    Ok(Arc::new(todos))
+                }
+                Comparator::NotEquals(to) => {
+                    let todos = self.equal_or_not(&to, false).await;
+                    Ok(Arc::new(todos))
+                }
+                Comparator::LessThan(_) => Ok(Arc::new(vec![])),
+                Comparator::GreaterThan(_) => Ok(Arc::new(vec![])),
+                Comparator::In(_) => Ok(Arc::new(vec![])),
             },
             Runner::Done => {
                 println!("***Runner is done***");
-                self.value.clone()
+                Ok(self.value.clone())
             }
         }
+    }
+
+    // Runners
+    async fn equal_or_not(&self, to: &str, flag: bool) -> Vec<ToDo> {
+        let todos = self.get_all().await.unwrap();
+
+        todos
+            .iter()
+            .filter(|todo| {
+                let value: Value = get_nested_value(todo, &self.needle).unwrap();
+                match value {
+                    Value::String(str_val) => {
+                        if flag {
+                            to == str_val
+                        } else {
+                            to != str_val
+                        }
+                    }
+                    _ => to == value,
+                }
+            })
+            .cloned()
+            .collect::<Vec<ToDo>>()
     }
 }
