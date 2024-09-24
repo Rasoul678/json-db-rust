@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
-use json_db::{fake_it, get_nested_value, Date, JsonDB, Name, Status, ToDo, User};
-use serde_json::Value;
+use json_db::{fake_it, Date, JsonDB, Name, Status, ToDo, User};
 
 #[tokio::main]
 async fn main() {
@@ -28,13 +27,11 @@ async fn main() {
             start: "2023-01-01".to_string(),
             end: "2025-01-01".to_string(),
         },
+        tags: vec!["rust".to_string(), "programming".to_string()],
+        point: 10,
     };
 
     my_db.insert(&my_todo).await.unwrap();
-
-    let first_todo = &todos.into_iter().nth(0).unwrap();
-    let value: Value = get_nested_value(first_todo, "id").unwrap();
-    println!("{:#?}", value);
 
     let all_todos_before = my_db.find_all().await.unwrap();
     // println!("{:#?}", all_todos_before);
@@ -43,13 +40,15 @@ async fn main() {
 
     let found = my_db
         .find()
-        ._where("user.name.first")
-        .equals("Rasoul")
+        ._where("point")
+        .less_than(500)
+        ._where("status")
+        .equals("Completed")
         .run()
         .await
         .unwrap();
 
-    println!("{:#?}", found.first().expect("Not found"));
+    println!("{:#?}", found);
 
     // my_db.delete_all().await.unwrap();
 

@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use fake::faker::internet::en::SafeEmail;
+use fake::faker::lorem::en::{Sentence, Words};
+use fake::faker::name::en::{FirstName, LastName};
 use fake::Dummy;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -24,21 +27,29 @@ impl Display for Status {
 #[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
 pub struct ToDo {
     pub id: String,
+    #[dummy(faker = "Sentence(5..10)")]
     pub text: String,
     pub status: Status,
     pub user: User,
     pub date: Date,
+    #[dummy(faker = "100..1000")]
+    pub point: u64,
+    #[dummy(faker = "Words(2..5)")]
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
 pub struct User {
     pub name: Name,
+    #[dummy(faker = "SafeEmail()")]
     pub email: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
 pub struct Name {
+    #[dummy(faker = "FirstName()")]
     pub first: String,
+    #[dummy(faker = "LastName()")]
     pub last: String,
 }
 

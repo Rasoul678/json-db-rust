@@ -14,9 +14,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 enum Comparator {
     Equals(String),
     NotEquals(String),
-    LessThan(usize),
-    GreaterThan(usize),
+    LessThan(u64),
+    GreaterThan(u64),
     In(Vec<String>),
+    Between((u64, u64)),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -331,41 +332,83 @@ impl JsonDB {
         }
     }
 
-    pub async fn execute(&self) -> Result<Option<ToDo>, io::Error> {
-        let content = self.read().await?;
-        let todo = content.todos.into_iter().next();
-        Ok(todo)
+    pub fn _in(&self, value: &[String]) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Compare(Comparator::In(value.to_vec())));
+
+        Self {
+            runners: Arc::new(runners),
+            ..self.clone()
+        }
+    }
+
+    pub fn less_than(&self, value: u64) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Compare(Comparator::LessThan(value)));
+
+        Self {
+            runners: Arc::new(runners),
+            ..self.clone()
+        }
+    }
+
+    pub fn greater_than(&self, value: u64) -> Self {
+        let mut runners = VecDeque::from(self.runners.as_ref().clone());
+        runners.push_back(Runner::Compare(Comparator::GreaterThan(value)));
+
+        Self {
+            runners: Arc::new(runners),
+            ..self.clone()
+        }
     }
 
     pub async fn run(&mut self) -> Result<Arc<Vec<ToDo>>, std::io::Error> {
         let runners = VecDeque::from(self.runners.as_ref().clone());
-        let mut key_chain = String::new();
+        let mut key_chain: VecDeque<String> = VecDeque::new();
 
-        for runner in runners {
-            if let Runner::Caller(ref c) = runner {
+        for r in runners {
+            if let Runner::Caller(ref c) = r {
                 if let CallerType::Read = c {
+                    let todos = self.get_all().await.unwrap();
+                    self.value = Arc::new(todos);
                     continue;
                 }
             }
 
-            if let Runner::Where(ref w) = runner {
-                key_chain.push_str(w);
+            if let Runner::Where(ref s) = r {
+                key_chain.push_back(s.to_string());
                 continue;
             }
 
-            if let Runner::Compare(ref cmp) = runner {
+            if let Runner::Compare(ref cmp) = r {
                 if let Comparator::Equals(to) = cmp {
-                    let todos = self.equal_or_not(&to, &key_chain, true).await;
-                    return Ok(Arc::new(todos));
+                    let todos = self.equal_or_not(&to, &mut key_chain, true).await;
+                    self.value = Arc::new(todos);
                 }
 
                 if let Comparator::NotEquals(to) = cmp {
-                    let todos = self.equal_or_not(&to, &key_chain, false).await;
-                    return Ok(Arc::new(todos));
+                    let todos = self.equal_or_not(&to, &mut key_chain, false).await;
+                    self.value = Arc::new(todos);
+                }
+
+                if let Comparator::In(list) = cmp {
+                    let key_chain = key_chain.pop_back().unwrap();
+                    let todos = self.contains(&list, &key_chain).await;
+                    self.value = Arc::new(todos);
+                }
+
+                if let Comparator::LessThan(number) = cmp {
+                    let todos = self.less_or_greater(number, &mut key_chain, true).await;
+                    self.value = Arc::new(todos);
+                }
+
+                if let Comparator::GreaterThan(number) = cmp {
+                    let todos = self.less_or_greater(number, &mut key_chain, false).await;
+                    self.value = Arc::new(todos);
                 }
             }
 
-            if let Runner::Done = runner {
+            if let Runner::Done = r {
                 return Ok(self.value.clone());
             }
         }
@@ -374,13 +417,19 @@ impl JsonDB {
     }
 
     // Runners
-    async fn equal_or_not(&self, to: &str, key_chain: &str, flag: bool) -> Vec<ToDo> {
-        let todos = self.get_all().await.unwrap();
+    async fn equal_or_not(
+        &self,
+        to: &str,
+        key_chain: &mut VecDeque<String>,
+        flag: bool,
+    ) -> Vec<ToDo> {
+        let todos = self.value.as_ref().clone();
+        let key = key_chain.pop_back().unwrap();
 
         todos
             .iter()
             .filter(|data| {
-                let value: Value = get_nested_value(data, key_chain).unwrap();
+                let value: Value = get_nested_value(data, &key).unwrap();
                 match value {
                     Value::String(str_val) => {
                         if flag {
@@ -390,6 +439,54 @@ impl JsonDB {
                         }
                     }
                     _ => to == value,
+                }
+            })
+            .cloned()
+            .collect::<Vec<ToDo>>()
+    }
+
+    async fn contains(&self, list: &[String], key_chain: &str) -> Vec<ToDo> {
+        let todos = self.get_all().await.unwrap();
+        todos
+            .iter()
+            .filter(|data| {
+                let value: Value = get_nested_value(data, key_chain).unwrap();
+                match value {
+                    Value::String(str_val) => list.contains(&str_val),
+                    _ => list.contains(&String::from("")),
+                }
+            })
+            .cloned()
+            .collect::<Vec<ToDo>>()
+    }
+
+    async fn less_or_greater(
+        &self,
+        number: &u64,
+        key_chain: &mut VecDeque<String>,
+        flag: bool,
+    ) -> Vec<ToDo> {
+        let todos = self.value.as_ref().clone();
+
+        let key = key_chain.pop_back().unwrap();
+
+        todos
+            .iter()
+            .filter(|data| {
+                let value: Value = get_nested_value(data, &key).unwrap();
+                match value {
+                    Value::Number(num_val) => {
+                        if let Some(n) = num_val.as_u64() {
+                            if flag {
+                                n < *number
+                            } else {
+                                n > *number
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
                 }
             })
             .cloned()
