@@ -61,7 +61,7 @@ pub struct Date {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JsonContent {
-    pub todos: Vec<ToDo>,
+    pub records: Vec<ToDo>,
 }
 
 #[derive(Debug)]

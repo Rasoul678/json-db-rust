@@ -9,7 +9,7 @@ async fn main() {
     let todos = fake_it::<ToDo>(10);
 
     for todo in &todos {
-        let _ = my_db.insert(&todo).await;
+        let _ = my_db.eingeben(&todo).await;
     }
 
     let my_todo = ToDo {
@@ -31,46 +31,32 @@ async fn main() {
         point: 10,
     };
 
-    my_db.insert(&my_todo).await.unwrap();
+    my_db.eingeben(&my_todo).await.unwrap();
 
-    let all_todos_before = my_db.find_all().await.unwrap();
-    // println!("{:#?}", all_todos_before);
-
-    let id = &all_todos_before.iter().nth(3).unwrap().id;
-
+    println!("************\nFound:\n************\n ");
     let found = my_db
-        .find()
-        ._where("point")
-        .less_than(500)
-        ._where("status")
-        .equals("Completed")
+        .finde()
+        .wo("point")
+        .zwischen([10, 400])
+        .wo("status")
+        .entspricht("Pending")
         .run()
         .await
         .unwrap();
 
     println!("{:#?}", found);
 
-    // my_db.delete_all().await.unwrap();
+    println!("************\nDeleted:\n************\n");
+    let deleted = my_db
+        .entferne()
+        .wo("status")
+        .nicht_entspricht("Archived")
+        .run()
+        .await
+        .unwrap();
 
-    // my_db.delete_completed().await.unwrap();
+    println!("{:#?}", deleted);
 
-    // let all_todos_after = my_db.get_all().await.unwrap();
-    // println!("{:#?}", all_todos_after);
-
-    // let item_by_id = my_db.get_by_id(id).run().await.unwrap();
-    // println!("{:#?}", item_by_id.first().unwrap());
-
-    // let deleted = my_db.delete(id).await.unwrap();
-    // println!("{:#?}", deleted);
-
-    // let deleted_by_id = my_db.delete_by_id(id).await.unwrap();
-    // println!("{:#?}", deleted_by_id);
-
-    // let deleted_arch = my_db.delete_archived().run().await;
-    // println!("{:#?}", deleted_arch);
-
-    // let deleted_com = my_db.delete_completed().run().await;
-    // println!("{:#?}", deleted_com);
-
-    // my_db.delete_not_completed().await.unwrap();
+    println!("************\nAll items in db has been deleted! :)\n************\n");
+    my_db.entferne_alle().await.unwrap();
 }

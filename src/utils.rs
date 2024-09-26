@@ -5,6 +5,32 @@ use serde_value::Value;
 use std::collections::VecDeque;
 use std::io::{Error, ErrorKind, Result};
 
+/// Generates a vector of `T` instances with random data using the `fake` crate.
+///
+/// This function is useful for generating fake data for testing or prototyping purposes.
+///
+/// # Arguments
+///
+/// * `count` - The number of `T` instances to generate.
+///
+/// # Returns
+///
+/// A vector of `T` instances with randomly generated data.
+///
+/// # Example
+///
+/// 
+/// use src::utils::fake_it;
+/// use fake::Dummy;
+///
+/// #[derive(Dummy)]
+/// struct Person {
+///     name: String,
+///     age: u32,
+/// }
+///
+/// let people: Vec<Person> = fake_it(10);
+/// 
 pub fn fake_it<T>(count: u32) -> Vec<T>
 where
     T: fake::Dummy<fake::Faker>
@@ -20,6 +46,22 @@ where
     list
 }
 
+/// Retrieves the value of a field by name from a serializable data structure.
+///
+/// This function takes a serializable data structure `data` and a field name `field`,
+/// and attempts to retrieve the value of the specified field. If the field is found,
+/// it is deserialized into the desired type `R` and returned. If the field is not
+/// found or the deserialization fails, an error is returned.
+///
+/// # Arguments
+///
+/// * `data` - The serializable data structure to retrieve the field from.
+/// * `field` - The name of the field to retrieve.
+///
+/// # Returns
+///
+/// A `Result` containing the deserialized value of the field, or an error if the
+/// field is not found or the deserialization fails.
 pub fn get_field_by_name<T, R>(data: T, field: &str) -> Result<R>
 where
     T: Serialize,
@@ -44,6 +86,22 @@ where
     }
 }
 
+/// Retrieves the value of a nested field in a serializable data structure.
+///
+/// This function takes a serializable data structure `data` and a dot-separated
+/// `key_chain` that specifies the path to a nested field. It attempts to retrieve
+/// the value of the specified field. If the field is found, it is returned as a
+/// `Value`. If any part of the key chain is not found, `None` is returned.
+///
+/// # Arguments
+///
+/// * `data` - The serializable data structure to retrieve the field from.
+/// * `key_chain` - A dot-separated string that specifies the path to the nested field.
+///
+/// # Returns
+///
+/// An `Option<Value>` containing the value of the specified nested field, or `None`
+/// if any part of the key chain is not found.
 pub fn get_key_chain_value<T>(data: T, key_chain: &str) -> Option<Value>
 where
     T: Serialize,
@@ -60,6 +118,22 @@ where
     Some(value)
 }
 
+/// Retrieves the value of a nested field in a serializable data structure.
+///
+/// This function takes a serializable data structure `data` and a dot-separated
+/// `key_chain` that specifies the path to a nested field. It attempts to retrieve
+/// the value of the specified field. If the field is found, it is returned as a
+/// `Value`. If any part of the key chain is not found, an error is returned.
+///
+/// # Arguments
+///
+/// * `data` - The serializable data structure to retrieve the field from.
+/// * `key_chain` - A dot-separated string that specifies the path to the nested field.
+///
+/// # Returns
+///
+/// A `Result` containing the value of the specified nested field, or an error if
+/// any part of the key chain is not found or the field cannot be deserialized.
 pub fn get_nested_value<T, R>(data: T, key_chain: &str) -> Result<R>
 where
     T: Serialize,
