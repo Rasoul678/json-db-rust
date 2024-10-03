@@ -21,7 +21,7 @@ enum Comparator {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-enum CallerType {
+enum MethodName {
     Create,
     Read,
     Update,
@@ -31,7 +31,7 @@ enum CallerType {
 #[derive(Clone, PartialEq, Debug)]
 enum Runner {
     Done,
-    Caller(CallerType),
+    Method(MethodName),
     Compare(Comparator),
     Where(String),
 }
@@ -74,14 +74,14 @@ impl JsonDB {
 
         Ok(db)
     }
-    async fn lies(&self) -> Result<JsonContent, io::Error> {
+    async fn read_from_db(&self) -> Result<JsonContent, io::Error> {
         let mut file = OpenOptions::new().read(true).open(&self.path).await?;
         let mut content = String::new();
         file.read_to_string(&mut content).await?;
         let json_data: JsonContent = serde_json::from_str(&content)?;
         Ok(json_data)
     }
-    async fn speichere(&self, content: JsonContent) -> Result<(), io::Error> {
+    async fn save_to_db(&self, content: JsonContent) -> Result<(), io::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -108,8 +108,8 @@ impl JsonDB {
         Ok(())
     }
 
-    pub async fn eingeben<'a>(&'a self, item: &'a ToDo) -> Result<&'a ToDo, io::Error> {
-        let mut content = self.lies().await?;
+    pub async fn insert<'a>(&'a self, item: &'a ToDo) -> Result<&'a ToDo, io::Error> {
+        let mut content = self.read_from_db().await?;
 
         for t in content.records.iter() {
             if t.id == item.id {
@@ -122,13 +122,13 @@ impl JsonDB {
 
         content.records.push(item.clone());
 
-        self.speichere(content).await?;
+        self.save_to_db(content).await?;
 
         Ok(item)
     }
 
-    async fn hole_alle(&self) -> Result<Vec<ToDo>, io::Error> {
-        let content = self.lies().await?;
+    async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
+        let content = self.read_from_db().await?;
         Ok(content.records)
     }
 
@@ -142,15 +142,15 @@ impl JsonDB {
     /// # Returns
     ///
     /// The updated `ToDo` item if the operation was successful, or an `io::Error` if the record was not found or there was an error.
-    pub async fn aktualisiere(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
-        let mut content = self.lies().await?;
+    pub async fn update(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
+        let mut content = self.read_from_db().await?;
         let todo_index = content
             .records
             .iter()
             .position(|todo| todo.id == id)
             .ok_or(io::Error::new(ErrorKind::NotFound, "Record not found"))?;
         content.records[todo_index] = todo.clone();
-        self.speichere(content).await?;
+        self.save_to_db(content).await?;
         Ok(todo)
     }
 
@@ -159,16 +159,16 @@ impl JsonDB {
     /// # Returns
     ///
     /// A `Result` that is `Ok(())` if the operation was successful, or an `Err(io::Error)` if there was an error.
-    pub async fn entferne_alle(&self) -> Result<(), io::Error> {
+    pub async fn delete_all(&self) -> Result<(), io::Error> {
         self.clear().await
     }
 
     /// Finds the current set of runners and adds a `Runner::Caller(CallerType::Read)` to the end of the queue.
     /// This method is used to indicate that the current operation is a read operation.
     /// The returned `Self` instance contains the updated runners queue.
-    pub fn finde(&self) -> Self {
+    pub fn find(&self) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Caller(CallerType::Read));
+        runners.push_back(Runner::Method(MethodName::Read));
 
         Self {
             runners: Arc::new(runners.clone()),
@@ -182,9 +182,9 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn entferne(&self) -> Self {
+    pub fn delete(&self) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Caller(CallerType::Delete));
+        runners.push_back(Runner::Method(MethodName::Delete));
 
         Self {
             runners: Arc::new(runners.clone()),
@@ -202,7 +202,7 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn wo(&self, field: &str) -> Self {
+    pub fn _where(&self, field: &str) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
         runners.push_back(Runner::Where(field.to_string()));
 
@@ -222,7 +222,7 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn entspricht(&self, value: &str) -> Self {
+    pub fn equals(&self, value: &str) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
         runners.push_back(Runner::Compare(Comparator::Equals(value.to_string())));
 
@@ -242,7 +242,7 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn nicht_entspricht(&self, value: &str) -> Self {
+    pub fn not_equals(&self, value: &str) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
         runners.push_back(Runner::Compare(Comparator::NotEquals(value.to_string())));
 
@@ -322,7 +322,7 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn zwischen(&self, range: [u64; 2]) -> Self {
+    pub fn between(&self, range: [u64; 2]) -> Self {
         let mut runners = VecDeque::from(self.runners.as_ref().clone());
         runners.push_back(Runner::Compare(Comparator::Between((range[0], range[1]))));
 
@@ -343,40 +343,40 @@ impl JsonDB {
     ///
     /// This method can return an `std::io::Error` if there is an issue reading or processing the data.
     pub async fn run(&mut self) -> Result<Arc<Vec<ToDo>>, std::io::Error> {
-        let runners = VecDeque::from(self.runners.as_ref().clone());
+        let runners_pool = VecDeque::from(self.runners.as_ref().clone());
         let mut key_chain: VecDeque<String> = VecDeque::new();
-        let mut method = CallerType::Read;
+        let mut method = MethodName::Read;
 
-        for r in runners {
-            if let Runner::Caller(ref c) = r {
-                if let CallerType::Read = c {
-                    let todos = self.hole_alle().await.unwrap();
+        for runner in runners_pool {
+            if let Runner::Method(ref c) = runner {
+                if let MethodName::Read = c {
+                    let todos = self.get_all().await.unwrap();
                     self.value = Arc::new(todos);
                     continue;
                 }
 
-                if let CallerType::Delete = c {
-                    method = CallerType::Delete;
+                if let MethodName::Delete = c {
+                    method = MethodName::Delete;
                     continue;
                 }
             }
 
-            if let Runner::Where(ref s) = r {
+            if let Runner::Where(ref s) = runner {
                 key_chain.push_back(s.to_string());
                 continue;
             }
 
-            if let Runner::Compare(ref cmp) = r {
+            if let Runner::Compare(ref cmp) = runner {
                 match cmp {
                     Comparator::Equals(to) => {
                         let equal = true;
 
-                        if method == CallerType::Read {
+                        if method == MethodName::Read {
                             let todos = self.find_if(equal, &to, &mut key_chain).await;
                             self.value = Arc::new(todos);
                         }
 
-                        if method == CallerType::Delete {
+                        if method == MethodName::Delete {
                             let deleted = self.delete_if(equal, &to, &mut key_chain).await.unwrap();
                             self.value = Arc::new(deleted);
                         }
@@ -384,12 +384,12 @@ impl JsonDB {
                     Comparator::NotEquals(to) => {
                         let not_equal = false;
 
-                        if method == CallerType::Read {
+                        if method == MethodName::Read {
                             let todos = self.find_if(not_equal, &to, &mut key_chain).await;
                             self.value = Arc::new(todos);
                         }
 
-                        if method == CallerType::Delete {
+                        if method == MethodName::Delete {
                             let deleted = self
                                 .delete_if(not_equal, &to, &mut key_chain)
                                 .await
@@ -398,17 +398,17 @@ impl JsonDB {
                         }
                     }
                     Comparator::In(list) => {
-                        let todos = self.enthalten(&list, &mut key_chain).await;
+                        let todos = self.contains(&list, &mut key_chain).await;
                         self.value = Arc::new(todos);
                     }
                     Comparator::LessThan(number) => {
                         let less_than = true;
-                        let todos = self.versuche_ob(number, less_than, &mut key_chain).await;
+                        let todos = self.check_if(number, less_than, &mut key_chain).await;
                         self.value = Arc::new(todos);
                     }
                     Comparator::GreaterThan(number) => {
                         let greater_than = false;
-                        let todos = self.versuche_ob(number, greater_than, &mut key_chain).await;
+                        let todos = self.check_if(number, greater_than, &mut key_chain).await;
                         self.value = Arc::new(todos);
                     }
                     Comparator::Between(range) => {
@@ -418,7 +418,7 @@ impl JsonDB {
                 };
             }
 
-            if let Runner::Done = r {
+            if let Runner::Done = runner {
                 return Ok(self.value.clone());
             }
         }
@@ -477,7 +477,7 @@ impl JsonDB {
     ///
     /// # Returns
     /// A `Vec<ToDo>` containing the subset of `ToDo` items where the value at the specified `key` is contained in the `list`.
-    async fn enthalten(&self, list: &[String], key_chain: &mut VecDeque<String>) -> Vec<ToDo> {
+    async fn contains(&self, list: &[String], key_chain: &mut VecDeque<String>) -> Vec<ToDo> {
         let todos = self.value.as_ref().clone();
         let key = key_chain.pop_back().unwrap();
 
@@ -494,7 +494,7 @@ impl JsonDB {
             .collect::<Vec<ToDo>>()
     }
 
-    async fn versuche_ob(
+    async fn check_if(
         &self,
         number: &u64,
         is: bool,
@@ -583,7 +583,7 @@ impl JsonDB {
         to: &str,
         key_chain: &mut VecDeque<String>,
     ) -> Result<Vec<ToDo>, io::Error> {
-        let mut content = self.lies().await?;
+        let mut content = self.read_from_db().await?;
         let key = key_chain.pop_back().unwrap();
 
         let deleted_vec = content
@@ -623,7 +623,7 @@ impl JsonDB {
             }
         });
 
-        self.speichere(content).await?;
+        self.save_to_db(content).await?;
 
         Ok(deleted_vec)
     }

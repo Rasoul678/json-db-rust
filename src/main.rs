@@ -9,7 +9,7 @@ async fn main() {
     let todos = fake_it::<ToDo>(10);
 
     for todo in &todos {
-        let _ = my_db.eingeben(&todo).await;
+        let _ = my_db.insert(&todo).await;
     }
 
     let my_todo = ToDo {
@@ -31,15 +31,15 @@ async fn main() {
         point: 10,
     };
 
-    my_db.eingeben(&my_todo).await.unwrap();
+    my_db.insert(&my_todo).await.unwrap();
 
     println!("************\nFound:\n************\n ");
     let found = my_db
-        .finde()
-        .wo("point")
-        .zwischen([10, 400])
-        .wo("status")
-        .entspricht("Pending")
+        .find()
+        ._where("point")
+        .between([10, 400])
+        ._where("status")
+        .equals("Pending")
         .run()
         .await
         .unwrap();
@@ -48,9 +48,9 @@ async fn main() {
 
     println!("************\nDeleted:\n************\n");
     let deleted = my_db
-        .entferne()
-        .wo("status")
-        .nicht_entspricht("Archived")
+        .delete()
+        ._where("status")
+        .not_equals("Archived")
         .run()
         .await
         .unwrap();
@@ -58,5 +58,5 @@ async fn main() {
     println!("{:#?}", deleted);
 
     println!("************\nAll items in db has been deleted! :)\n************\n");
-    my_db.entferne_alle().await.unwrap();
+    my_db.delete_all().await.unwrap();
 }
