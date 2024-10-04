@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 
-use std::collections::HashSet;
 use json_db::{fake_it, Date, JsonDB, Name, Status, ToDo, User};
+use std::collections::HashSet;
 
 #[tokio::main]
 async fn main() {
@@ -43,7 +43,7 @@ async fn main() {
         .where_("status")
         .equals("Pending")
         .where_("point")
-        .less_than(300)
+        .less_than(500)
         .run()
         .await
         .unwrap();
@@ -51,16 +51,18 @@ async fn main() {
     println!("{:#?}", found);
 
     println!("************\nDeleted:\n************\n");
-    // let deleted = my_db
-    //     .delete()
-    //     .where_("status")
-    //     .not_equals("Archived")
-    //     .run()
-    //     .await
-    //     .unwrap();
+    let deleted = my_db
+        .delete()
+        .where_("status")
+        .not_equals("Archived")
+        .where_("point")
+        .less_than(500)
+        .run()
+        .await
+        .unwrap();
 
-    // println!("{:#?}", deleted);
+    println!("{:#?}", deleted);
 
     println!("************\nAll items in db has been deleted! :)\n************\n");
-    my_db.delete_all().await.unwrap();
+    my_db.delete().run().await.unwrap();
 }

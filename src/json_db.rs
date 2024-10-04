@@ -2,6 +2,7 @@
 
 use crate::get_nested_value;
 use crate::types::{JsonContent, ToDo};
+use colored::{customcolors::CustomColor, *};
 use serde_json::Value;
 use std::collections::{HashSet, VecDeque};
 use std::io::{self, ErrorKind};
@@ -61,12 +62,13 @@ impl JsonDB {
         let mut content = String::new();
 
         file.try_clone().await?.read_to_string(&mut content).await?;
+        let value = HashSet::new();
 
-        let value: HashSet<ToDo> = if content.is_empty() {
-            HashSet::new()
-        } else {
-            serde_json::from_str(&content).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?
-        };
+        // let value: HashSet<ToDo> = if content.is_empty() {
+        //     HashSet::new()
+        // } else {
+        //     serde_json::from_str(&content).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?
+        // };
 
         let db = JsonDB {
             name: db_name.to_string(),
@@ -193,8 +195,13 @@ impl JsonDB {
         self
     }
 
-    /// Adds a `Runner::Caller(CallerType::Delete)` to the end of the runners queue, indicating that the current operation is a delete operation.
+    /// Adds a `Runner::Method(MethodName::Delete(c))` to the end of the runners queue,
+    /// indicating that the current operation is a delete operation.
     /// The returned `Self` instance contains the updated runners queue.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The character to use for the delete operation.
     ///
     /// # Returns
     ///
@@ -320,294 +327,156 @@ impl JsonDB {
         self
     }
 
-    /// Runs the query defined by the `runners` queue, filtering and transforming the data as specified.
-    /// The final result is stored in the `value` field of the `Self` instance.
+    /// Runs the database operations specified in the runners queue.
     ///
-    /// This method iterates through the `runners` queue and applies the corresponding filtering or transformation logic.
-    /// The `key_chain` is used to keep track of the nested keys being accessed for the current operation.
-    /// The final result is returned as an `Arc<Vec<ToDo>>`.
+    /// This method processes the runners queue, performing various database operations such as creating, reading, updating, and deleting records.
+    /// The method returns the resulting set of `ToDo` items after applying the specified operations.
     ///
     /// # Errors
     ///
-    /// This method can return an `std::io::Error` if there is an issue reading or processing the data.
+    /// This method may return an `std::io::Error` if there is an error saving the database state after the operations are completed.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `HashSet` of `ToDo` items representing the final state of the database after the operations have been performed.
     pub async fn run(&mut self) -> Result<HashSet<ToDo>, std::io::Error> {
         let mut result = (*self.value).clone();
-        let mut field = String::new();
+        let mut key_chain = String::new();
+        let mut method: Option<MethodName> = None;
         Arc::make_mut(&mut self.runners).push_back(Runner::Done);
 
         while let Some(runner) = Arc::make_mut(&mut self.runners).pop_front() {
             match runner {
-                Runner::Method(name) => {
-                    match name {
-                        MethodName::Create(new_item) => {
-                            let mut todos = self
-                                .value
-                                .iter()
-                                .map(Clone::clone)
-                                .collect::<VecDeque<ToDo>>();
-
-                            //* Check if the new item already exists in the database
-                            //* If so, you know what to do (just kidding 😉)
-                            //* If it does, return an error
-                            let so_weit_so_gut =
-                                Arc::make_mut(&mut self.value).insert(new_item.clone());
-
-                            //* Make sure that id is unique
-                            if so_weit_so_gut {
-                                while let Some(todo) = todos.pop_front() {
-                                    if todo.id == new_item.id {
-                                        return Err(io::Error::new(
-                                            ErrorKind::AlreadyExists,
-                                            "Record already exists",
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        MethodName::Read => {
-                            // TODO: Implementation for Read
-                        }
-                        MethodName::Update => {
-                            // TODO: Implementation for Update
-                        }
-                        MethodName::Delete => {
-                            // TODO: Implementation for Delete
-                        }
+                Runner::Method(name) => match name {
+                    MethodName::Create(new_item) => {
+                        method = Some(MethodName::Create(new_item.clone()));
                     }
-
-                    self.save().await?;
-                }
+                    _ => {
+                        method = Some(name);
+                    }
+                },
                 Runner::Where(f) => {
-                    field = f;
+                    key_chain = f;
                 }
                 Runner::Compare(ref comparator) => {
                     result = result
                         .into_iter()
                         .filter(|todo| {
-                            let value: Value = get_nested_value(todo, &field).unwrap();
-                            match comparator {
-                                Comparator::Equals(v) => value.as_str() == Some(v.as_str()),
-                                Comparator::NotEquals(v) => value.as_str() != Some(v.as_str()),
-                                Comparator::LessThan(v) => value.as_u64().map_or(false, |x| x < *v),
-                                Comparator::GreaterThan(v) => {
-                                    value.as_u64().map_or(false, |x| x > *v)
-                                }
-                                Comparator::In(vs) => value
-                                    .as_str()
-                                    .map_or(false, |x| vs.contains(&x.to_string())),
-                                Comparator::Between((start, end)) => {
-                                    value.as_u64().map_or(false, |x| x >= *start && x <= *end)
-                                }
-                            }
+                            let value: Value = get_nested_value(todo, &key_chain).unwrap();
+                            self.filter_with_conmpare(value, comparator)
                         })
                         .collect();
                 }
-                Runner::Done => break,
+                Runner::Done => {
+                    let teal = CustomColor::new(0, 201, 217);
+                    let gold = CustomColor::new(251, 190, 13);
+                    let green = CustomColor::new(8, 171, 112);
+                    let yellow = CustomColor::new(242, 140, 54);
+                    let red = CustomColor::new(217, 33, 33);
+
+                    match method {
+                        Some(MethodName::Read) => {
+                            println!(
+                                "{lead} {} {trail}",
+                                self.name.custom_color(gold).bold(),
+                                lead = "Querying".custom_color(teal).bold(),
+                                trail = "database...".custom_color(teal).bold()
+                            )
+                        }
+                        Some(MethodName::Create(ref new_item)) => {
+                            self.insert_into_records(&new_item)?;
+
+                            println!(
+                                "{lead} {} {trail}\n {} \n",
+                                self.name.custom_color(gold).bold(),
+                                new_item,
+                                lead = "Creating new record in".custom_color(green).bold(),
+                                trail = "database...".custom_color(green).bold()
+                            );
+                        }
+                        Some(MethodName::Update) => {
+                            println!(
+                                "{lead} {} {middle} {} {trail}",
+                                result.len().to_string().custom_color(teal).bold(),
+                                self.name.custom_color(gold).bold(),
+                                lead = "Updating".custom_color(yellow).bold(),
+                                middle = "records in".custom_color(yellow).bold(),
+                                trail = "database...".custom_color(yellow).bold()
+                            );
+                        }
+
+                        Some(MethodName::Delete) => {
+                            for t in result.iter() {
+                                Arc::make_mut(&mut self.value).retain(|todo| todo.id != t.id);
+                            }
+
+                            let mut lenght = result.len().to_string();
+
+                            if self.value.is_empty() {
+                                lenght = "all".to_string();
+                            }
+
+                            println!(
+                                "{lead} {} {middle} {} {trail}",
+                                lenght.custom_color(teal).bold(),
+                                self.name.custom_color(gold).bold(),
+                                lead = "Deleting".custom_color(red).bold(),
+                                middle = "records from".custom_color(red).bold(),
+                                trail = "database...".custom_color(red).bold()
+                            );
+                        }
+                        _ => {}
+                    }
+
+                    self.save().await?;
+
+                    break;
+                }
             }
         }
 
         Ok(result)
     }
 
-    //*! comparators
-    /// Finds a subset of `ToDo` items from the `value` field based on the provided `is` boolean and `to` string.
-    ///
-    /// The `key_chain` parameter is used to access nested values within the `ToDo` items. The `find_if` function
-    /// iterates over the `ToDo` items, extracts the value at the specified `key`, and compares it to the `to`
-    /// parameter based on the `is` boolean. The resulting `ToDo` items are collected and returned.
-    ///
-    /// # Arguments
-    /// * `is` - A boolean indicating whether to find items where the value matches or does not match the `to` parameter.
-    /// * `to` - The string to compare the extracted values against.
-    /// * `key_chain` - A mutable `VecDeque` containing the keys to access nested values within the `ToDo` items.
-    ///
-    /// # Returns
-    /// A `Vec<ToDo>` containing the subset of `ToDo` items that match the provided criteria.
-    async fn find_if(&self, is: bool, to: &str, key_chain: &mut VecDeque<String>) -> Vec<ToDo> {
-        let todos = self.value.as_ref().clone();
-        let key = key_chain.pop_back().unwrap();
-
-        todos
-            .iter()
-            .filter(|data| {
-                let value: Value = get_nested_value(data, &key).unwrap();
-                match value {
-                    Value::String(str_val) => {
-                        if is {
-                            to == str_val
-                        } else if !is {
-                            to != str_val
-                        } else {
-                            false
-                        }
-                    }
-                    _ => to == value.to_string(),
-                }
-            })
-            .cloned()
-            .collect::<Vec<ToDo>>()
-    }
-
-    /// Finds a subset of `ToDo` items from the `value` field where the value at the specified `key` is contained in the provided `list`.
-    ///
-    /// The `key_chain` parameter is used to access nested values within the `ToDo` items. The `enthalten` function
-    /// iterates over the `ToDo` items, extracts the value at the specified `key`, and checks if it is contained in the `list`.
-    /// The resulting `ToDo` items are collected and returned.
-    ///
-    /// # Arguments
-    /// * `list` - A slice of `String` values to check for containment.
-    /// * `key_chain` - A mutable `VecDeque` containing the keys to access nested values within the `ToDo` items.
-    ///
-    /// # Returns
-    /// A `Vec<ToDo>` containing the subset of `ToDo` items where the value at the specified `key` is contained in the `list`.
-    async fn contains(&self, list: &[String], key_chain: &mut VecDeque<String>) -> Vec<ToDo> {
-        let todos = self.value.as_ref().clone();
-        let key = key_chain.pop_back().unwrap();
-
-        todos
-            .iter()
-            .filter(|data| {
-                let value: Value = get_nested_value(data, &key).unwrap();
-                match value {
-                    Value::String(str_val) => list.contains(&str_val),
-                    _ => list.contains(&String::from("")),
-                }
-            })
-            .cloned()
-            .collect::<Vec<ToDo>>()
-    }
-
-    async fn check_if(
-        &self,
-        number: &u64,
-        is: bool,
-        key_chain: &mut VecDeque<String>,
-    ) -> Vec<ToDo> {
-        let todos = self.value.as_ref().clone();
-
-        let key = key_chain.pop_back().unwrap();
-
-        todos
-            .iter()
-            .filter(|data| {
-                let value: Value = get_nested_value(data, &key).unwrap();
-                match value {
-                    Value::Number(num_val) => {
-                        if let Some(n) = num_val.as_u64() {
-                            if is {
-                                n < *number
-                            } else if !is {
-                                n > *number
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                }
-            })
-            .cloned()
-            .collect::<Vec<ToDo>>()
-    }
-
-    /// Retrieves a vector of `ToDo` items from the JSON database where the value of the specified key is within the given numeric range.
-    ///
-    /// This function takes a mutable reference to a `VecDeque` of strings representing the key chain to access the value, and a tuple of two `u64` values representing the inclusive range.
-    ///
-    /// # Arguments
-    /// * `range` - A tuple of two `u64` values representing the inclusive range to filter the values by.
-    /// * `key_chain` - A mutable reference to a `VecDeque` of strings representing the key chain to access the value to be compared.
-    ///
-    /// # Returns
-    /// A `Vec` of `ToDo` items that have a numeric value within the specified range for the given key chain.
-    async fn between_range(
-        &self,
-        range: &(u64, u64),
-        key_chain: &mut VecDeque<String>,
-    ) -> Vec<ToDo> {
-        let todos = self.value.as_ref().clone();
-        let key = key_chain.pop_back().unwrap();
-
-        todos
-            .iter()
-            .filter(|data| {
-                let value: Value = get_nested_value(data, &key).unwrap();
-                match value {
-                    Value::Number(num_val) => {
-                        if let Some(n) = num_val.as_u64() {
-                            n >= range.0 && n <= range.1
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                }
-            })
-            .cloned()
-            .collect::<Vec<ToDo>>()
-    }
-
-    /// Deletes a set of `ToDo` items from the JSON database based on a string comparison.
-    ///
-    /// This function takes a boolean flag `is`, a string `to`, and a mutable `VecDeque` of strings `key_chain`. It reads the current content of the JSON database, filters the `ToDo` items based on the provided parameters, and then saves the updated content back to the database. The function returns a `Result` containing the deleted `ToDo` items.
-    ///
-    /// # Arguments
-    /// * `is` - A boolean flag indicating whether to delete items where the value matches `to` or where it does not match.
-    /// * `to` - A string to compare the value against.
-    /// * `key_chain` - A mutable `VecDeque` of strings representing the key chain to access the value to be compared.
-    ///
-    /// # Returns
-    /// A `Result` containing a `Vec` of `ToDo` items that were deleted.
-    async fn delete_if(
-        &self,
-        is: bool,
-        to: &str,
-        key_chain: &mut VecDeque<String>,
-    ) -> Result<Vec<ToDo>, io::Error> {
-        let mut content = self.read_content().await?;
-        let key = key_chain.pop_back().unwrap();
-
-        let deleted_vec = content
-            .records
-            .iter()
-            .filter(|todo| {
-                let value: Value = get_nested_value(todo, &key).unwrap();
-                match value {
-                    Value::String(str_val) => {
-                        if is {
-                            to == str_val
-                        } else if !is {
-                            to != str_val
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                }
-            })
-            .cloned()
-            .collect::<Vec<ToDo>>();
-
-        content.records.retain(|todo| {
-            let value: Value = get_nested_value(todo, &key).unwrap();
-            match value {
-                Value::String(str_val) => {
-                    if is {
-                        to != str_val
-                    } else if !is {
-                        to == str_val
-                    } else {
-                        true
-                    }
-                }
-                _ => true,
+    fn filter_with_conmpare(&self, value: Value, comparator: &Comparator) -> bool {
+        match comparator {
+            Comparator::Equals(v) => value.as_str() == Some(v.as_str()),
+            Comparator::NotEquals(v) => value.as_str() != Some(v.as_str()),
+            Comparator::LessThan(v) => value.as_u64().map_or(false, |x| x < *v),
+            Comparator::GreaterThan(v) => value.as_u64().map_or(false, |x| x > *v),
+            Comparator::In(vs) => value
+                .as_str()
+                .map_or(false, |x| vs.contains(&x.to_string())),
+            Comparator::Between((start, end)) => {
+                value.as_u64().map_or(false, |x| x >= *start && x <= *end)
             }
-        });
+        }
+    }
 
-        self.save_content(content).await?;
+    fn insert_into_records<'a>(&mut self, new_item: &'a ToDo) -> Result<&'a ToDo, io::Error> {
+        let mut todos = self
+            .value
+            .iter()
+            .map(Clone::clone)
+            .collect::<VecDeque<ToDo>>();
 
-        Ok(deleted_vec)
+        //* Check if the new item already exists in the database
+        //* If so, you know what to do (just kidding 😉)
+        //* If it does, return an error
+        let so_weit_so_gut = Arc::make_mut(&mut self.value).insert(new_item.clone());
+
+        //* Make sure that id is unique
+        if so_weit_so_gut {
+            while let Some(todo) = todos.pop_front() {
+                if todo.id == new_item.id {
+                    return Err(io::Error::new(
+                        ErrorKind::AlreadyExists,
+                        "Record already exists",
+                    ));
+                }
+            }
+        }
+
+        Ok(new_item)
     }
 }

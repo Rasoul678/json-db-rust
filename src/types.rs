@@ -14,12 +14,22 @@ pub enum Status {
     Archived,
 }
 
+impl Display for ToDo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{\n   id: {}\n   status: {}\n   text: \"{}\"\n   point: {}\n   user: {}\n   ...\n }}",
+            self.id, self.status, self.text, self.point, self.user
+        )
+    }
+}
+
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Status::Pending => write!(f, "Pending"),
-            Status::Completed => write!(f, "Completed"),
-            Status::Archived => write!(f, "Archived"),
+            Status::Pending => write!(f, "Status(Pending)"),
+            Status::Completed => write!(f, "Status(Completed)"),
+            Status::Archived => write!(f, "Status(Archived)"),
         }
     }
 }
@@ -43,6 +53,16 @@ pub struct User {
     pub name: Name,
     #[dummy(faker = "SafeEmail()")]
     pub email: String,
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{\n      name: \"{:>}\"\n      email: \"{}\"\n   }}",
+            self.name.first, self.email
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
