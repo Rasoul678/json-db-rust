@@ -3,7 +3,7 @@
 use crate::get_nested_value;
 use crate::types::{JsonContent, ToDo};
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ enum Comparator {
 
 #[derive(Clone, PartialEq, Debug)]
 enum MethodName {
-    Create,
+    Create(ToDo),
     Read,
     Update,
     Delete,
@@ -41,7 +41,7 @@ pub struct JsonDB {
     name: String,
     path: PathBuf,
     file: Arc<File>,
-    value: Arc<Vec<ToDo>>,
+    value: Arc<HashSet<ToDo>>,
     runners: Arc<VecDeque<Runner>>,
 }
 
@@ -49,39 +49,59 @@ impl JsonDB {
     pub async fn new(db_name: &str) -> Result<JsonDB, io::Error> {
         let dir_path = std::env::current_dir()?;
         let file_with_format = format!("{}.json", db_name);
-        let path = dir_path.join(file_with_format);
+        let file_path = dir_path.join(file_with_format);
 
-        //? Try to open json file Or create a new one!
-        let mut json_db_file = OpenOptions::new()
-            .create(true)
+        let file = OpenOptions::new()
+            .read(true)
             .write(true)
-            .truncate(true)
-            .open(&path)
+            .create(true)
+            .open(&file_path)
             .await?;
 
-        //? Write into the file
-        json_db_file
-            .write_all(format!("{{\"records\":[]}}").as_bytes())
-            .await?;
+        let mut content = String::new();
 
-        let db = Self {
+        file.try_clone().await?.read_to_string(&mut content).await?;
+
+        let value: HashSet<ToDo> = if content.is_empty() {
+            HashSet::new()
+        } else {
+            serde_json::from_str(&content).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?
+        };
+
+        let db = JsonDB {
             name: db_name.to_string(),
-            path,
-            file: json_db_file.into(),
-            value: Arc::new(vec![]),
+            path: file_path,
+            file: Arc::new(file),
+            value: Arc::new(value),
             runners: Arc::new(VecDeque::new()),
         };
 
         Ok(db)
     }
-    async fn read_from_db(&self) -> Result<JsonContent, io::Error> {
+
+    pub async fn save(&self) -> Result<(), io::Error> {
+        let json = serde_json::to_string_pretty(&*self.value)
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.path)
+            .await?;
+
+        file.write_all(json.as_bytes()).await?;
+        file.flush().await?;
+
+        Ok(())
+    }
+    async fn read_content(&self) -> Result<JsonContent, io::Error> {
         let mut file = OpenOptions::new().read(true).open(&self.path).await?;
         let mut content = String::new();
         file.read_to_string(&mut content).await?;
         let json_data: JsonContent = serde_json::from_str(&content)?;
         Ok(json_data)
     }
-    async fn save_to_db(&self, content: JsonContent) -> Result<(), io::Error> {
+    async fn save_content(&self, content: JsonContent) -> Result<(), io::Error> {
         let mut file = OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -101,34 +121,20 @@ impl JsonDB {
             .open(&self.path)
             .await?;
 
-        file.write_all(b"{\"records\":[]}").await?;
+        file.write_all(b"").await?;
 
         file.flush().await?;
 
         Ok(())
     }
 
-    pub async fn insert<'a>(&'a self, item: &'a ToDo) -> Result<&'a ToDo, io::Error> {
-        let mut content = self.read_from_db().await?;
-
-        for t in content.records.iter() {
-            if t.id == item.id {
-                return Err(io::Error::new(
-                    ErrorKind::AlreadyExists,
-                    "Record already exists",
-                ));
-            }
-        }
-
-        content.records.push(item.clone());
-
-        self.save_to_db(content).await?;
-
-        Ok(item)
+    pub fn insert(&mut self, item: ToDo) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Create(item)));
+        self
     }
 
-    async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
-        let content = self.read_from_db().await?;
+    pub async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
+        let content = self.read_content().await?;
         Ok(content.records)
     }
 
@@ -142,15 +148,15 @@ impl JsonDB {
     /// # Returns
     ///
     /// The updated `ToDo` item if the operation was successful, or an `io::Error` if the record was not found or there was an error.
-    pub async fn update(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
-        let mut content = self.read_from_db().await?;
+    pub async fn update_todo(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
+        let mut content = self.read_content().await?;
         let todo_index = content
             .records
             .iter()
             .position(|todo| todo.id == id)
             .ok_or(io::Error::new(ErrorKind::NotFound, "Record not found"))?;
         content.records[todo_index] = todo.clone();
-        self.save_to_db(content).await?;
+        self.save_content(content).await?;
         Ok(todo)
     }
 
@@ -163,17 +169,28 @@ impl JsonDB {
         self.clear().await
     }
 
-    /// Finds the current set of runners and adds a `Runner::Caller(CallerType::Read)` to the end of the queue.
-    /// This method is used to indicate that the current operation is a read operation.
+    /// Adds a `Runner::Method(MethodName::Read)` to the end of the runners queue, indicating that the current operation is a read operation.
     /// The returned `Self` instance contains the updated runners queue.
-    pub fn find(&self) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Method(MethodName::Read));
+    ///
+    /// # Returns
+    ///
+    /// A new `Self` instance with the updated runners queue.
+    pub fn find(&mut self) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Read));
 
-        Self {
-            runners: Arc::new(runners.clone()),
-            ..self.clone()
-        }
+        self
+    }
+
+    /// Adds a `Runner::Method(MethodName::Update)` to the end of the runners queue, indicating that the current operation is an update operation.
+    /// The returned `Self` instance contains the updated runners queue.
+    ///
+    /// # Returns
+    ///
+    /// A new `Self` instance with the updated runners queue.
+    pub fn update(&mut self) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Update));
+
+        self
     }
 
     /// Adds a `Runner::Caller(CallerType::Delete)` to the end of the runners queue, indicating that the current operation is a delete operation.
@@ -182,17 +199,13 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn delete(&self) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Method(MethodName::Delete));
+    pub fn delete(&mut self) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Delete));
 
-        Self {
-            runners: Arc::new(runners.clone()),
-            ..self.clone()
-        }
+        self
     }
 
-    /// Adds a `Runner::Where` to the end of the runners queue, filtering the data based on the provided field.
+    /// Adds a `Runner::Where(field.to_string())` to the end of the runners queue, filtering the data based on the provided field.
     /// The returned `Self` instance contains the updated runners queue.
     ///
     /// # Arguments
@@ -202,14 +215,10 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn _where(&self, field: &str) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Where(field.to_string()));
+    pub fn where_(&mut self, field: &str) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Where(field.to_string()));
 
-        Self {
-            runners: Arc::new(runners.clone()),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::Equals(value.to_string()))` to the end of the runners queue, filtering the data based on the provided value.
@@ -222,14 +231,11 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn equals(&self, value: &str) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::Equals(value.to_string())));
+    pub fn equals(&mut self, value: &str) -> &mut Self {
+        Arc::make_mut(&mut self.runners)
+            .push_back(Runner::Compare(Comparator::Equals(value.to_string())));
 
-        Self {
-            runners: Arc::new(runners.clone()),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::NotEquals(value.to_string()))` to the end of the runners queue, filtering the data based on the provided value.
@@ -242,14 +248,11 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn not_equals(&self, value: &str) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::NotEquals(value.to_string())));
+    pub fn not_equals(&mut self, value: &str) -> &mut Self {
+        Arc::make_mut(&mut self.runners)
+            .push_back(Runner::Compare(Comparator::NotEquals(value.to_string())));
 
-        Self {
-            runners: Arc::new(runners.clone()),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::In(value.to_vec()))` to the end of the runners queue, filtering the data based on the provided values.
@@ -262,14 +265,10 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn is_in(&self, value: &[String]) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::In(value.to_vec())));
+    pub fn in_(&mut self, values: Vec<String>) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Compare(Comparator::In(values)));
 
-        Self {
-            runners: Arc::new(runners),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::LessThan(value))` to the end of the runners queue, filtering the data based on the provided value.
@@ -282,14 +281,10 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn less_than(&self, value: u64) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::LessThan(value)));
+    pub fn less_than(&mut self, value: u64) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Compare(Comparator::LessThan(value)));
 
-        Self {
-            runners: Arc::new(runners),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::GreaterThan(value))` to the end of the runners queue, filtering the data based on the provided value.
@@ -302,14 +297,10 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn greater_than(&self, value: u64) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::GreaterThan(value)));
+    pub fn greater_than(&mut self, value: u64) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Compare(Comparator::GreaterThan(value)));
 
-        Self {
-            runners: Arc::new(runners),
-            ..self.clone()
-        }
+        self
     }
 
     /// Adds a `Runner::Compare(Comparator::Between(range))` to the end of the runners queue, filtering the data based on the provided range.
@@ -322,14 +313,11 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn between(&self, range: [u64; 2]) -> Self {
-        let mut runners = VecDeque::from(self.runners.as_ref().clone());
-        runners.push_back(Runner::Compare(Comparator::Between((range[0], range[1]))));
+    pub fn between(&mut self, start: u64, end: u64) -> &mut Self {
+        Arc::make_mut(&mut self.runners)
+            .push_back(Runner::Compare(Comparator::Between((start, end))));
 
-        Self {
-            runners: Arc::new(runners),
-            ..self.clone()
-        }
+        self
     }
 
     /// Runs the query defined by the `runners` queue, filtering and transforming the data as specified.
@@ -342,88 +330,83 @@ impl JsonDB {
     /// # Errors
     ///
     /// This method can return an `std::io::Error` if there is an issue reading or processing the data.
-    pub async fn run(&mut self) -> Result<Arc<Vec<ToDo>>, std::io::Error> {
-        let runners_pool = VecDeque::from(self.runners.as_ref().clone());
-        let mut key_chain: VecDeque<String> = VecDeque::new();
-        let mut method = MethodName::Read;
+    pub async fn run(&mut self) -> Result<HashSet<ToDo>, std::io::Error> {
+        let mut result = (*self.value).clone();
+        let mut field = String::new();
+        Arc::make_mut(&mut self.runners).push_back(Runner::Done);
 
-        for runner in runners_pool {
-            if let Runner::Method(ref c) = runner {
-                if let MethodName::Read = c {
-                    let todos = self.get_all().await.unwrap();
-                    self.value = Arc::new(todos);
-                    continue;
+        while let Some(runner) = Arc::make_mut(&mut self.runners).pop_front() {
+            match runner {
+                Runner::Method(name) => {
+                    match name {
+                        MethodName::Create(new_item) => {
+                            let mut todos = self
+                                .value
+                                .iter()
+                                .map(Clone::clone)
+                                .collect::<VecDeque<ToDo>>();
+
+                            //* Check if the new item already exists in the database
+                            //* If so, you know what to do (just kidding 😉)
+                            //* If it does, return an error
+                            let so_weit_so_gut =
+                                Arc::make_mut(&mut self.value).insert(new_item.clone());
+
+                            //* Make sure that id is unique
+                            if so_weit_so_gut {
+                                while let Some(todo) = todos.pop_front() {
+                                    if todo.id == new_item.id {
+                                        return Err(io::Error::new(
+                                            ErrorKind::AlreadyExists,
+                                            "Record already exists",
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        MethodName::Read => {
+                            // TODO: Implementation for Read
+                        }
+                        MethodName::Update => {
+                            // TODO: Implementation for Update
+                        }
+                        MethodName::Delete => {
+                            // TODO: Implementation for Delete
+                        }
+                    }
+
+                    self.save().await?;
                 }
-
-                if let MethodName::Delete = c {
-                    method = MethodName::Delete;
-                    continue;
+                Runner::Where(f) => {
+                    field = f;
                 }
-            }
-
-            if let Runner::Where(ref s) = runner {
-                key_chain.push_back(s.to_string());
-                continue;
-            }
-
-            if let Runner::Compare(ref cmp) = runner {
-                match cmp {
-                    Comparator::Equals(to) => {
-                        let equal = true;
-
-                        if method == MethodName::Read {
-                            let todos = self.find_if(equal, &to, &mut key_chain).await;
-                            self.value = Arc::new(todos);
-                        }
-
-                        if method == MethodName::Delete {
-                            let deleted = self.delete_if(equal, &to, &mut key_chain).await.unwrap();
-                            self.value = Arc::new(deleted);
-                        }
-                    }
-                    Comparator::NotEquals(to) => {
-                        let not_equal = false;
-
-                        if method == MethodName::Read {
-                            let todos = self.find_if(not_equal, &to, &mut key_chain).await;
-                            self.value = Arc::new(todos);
-                        }
-
-                        if method == MethodName::Delete {
-                            let deleted = self
-                                .delete_if(not_equal, &to, &mut key_chain)
-                                .await
-                                .unwrap();
-                            self.value = Arc::new(deleted);
-                        }
-                    }
-                    Comparator::In(list) => {
-                        let todos = self.contains(&list, &mut key_chain).await;
-                        self.value = Arc::new(todos);
-                    }
-                    Comparator::LessThan(number) => {
-                        let less_than = true;
-                        let todos = self.check_if(number, less_than, &mut key_chain).await;
-                        self.value = Arc::new(todos);
-                    }
-                    Comparator::GreaterThan(number) => {
-                        let greater_than = false;
-                        let todos = self.check_if(number, greater_than, &mut key_chain).await;
-                        self.value = Arc::new(todos);
-                    }
-                    Comparator::Between(range) => {
-                        let todos = self.between_range(range, &mut key_chain).await;
-                        self.value = Arc::new(todos);
-                    }
-                };
-            }
-
-            if let Runner::Done = runner {
-                return Ok(self.value.clone());
+                Runner::Compare(ref comparator) => {
+                    result = result
+                        .into_iter()
+                        .filter(|todo| {
+                            let value: Value = get_nested_value(todo, &field).unwrap();
+                            match comparator {
+                                Comparator::Equals(v) => value.as_str() == Some(v.as_str()),
+                                Comparator::NotEquals(v) => value.as_str() != Some(v.as_str()),
+                                Comparator::LessThan(v) => value.as_u64().map_or(false, |x| x < *v),
+                                Comparator::GreaterThan(v) => {
+                                    value.as_u64().map_or(false, |x| x > *v)
+                                }
+                                Comparator::In(vs) => value
+                                    .as_str()
+                                    .map_or(false, |x| vs.contains(&x.to_string())),
+                                Comparator::Between((start, end)) => {
+                                    value.as_u64().map_or(false, |x| x >= *start && x <= *end)
+                                }
+                            }
+                        })
+                        .collect();
+                }
+                Runner::Done => break,
             }
         }
 
-        Ok(self.value.clone())
+        Ok(result)
     }
 
     //*! comparators
@@ -583,7 +566,7 @@ impl JsonDB {
         to: &str,
         key_chain: &mut VecDeque<String>,
     ) -> Result<Vec<ToDo>, io::Error> {
-        let mut content = self.read_from_db().await?;
+        let mut content = self.read_content().await?;
         let key = key_chain.pop_back().unwrap();
 
         let deleted_vec = content
@@ -623,7 +606,7 @@ impl JsonDB {
             }
         });
 
-        self.save_to_db(content).await?;
+        self.save_content(content).await?;
 
         Ok(deleted_vec)
     }

@@ -1,4 +1,4 @@
-use fake::{ Fake, Faker};
+use fake::{Fake, Faker};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_value::Value;
@@ -19,7 +19,7 @@ use std::io::{Error, ErrorKind, Result};
 ///
 /// # Example
 ///
-/// 
+///
 /// use src::utils::fake_it;
 /// use fake::Dummy;
 ///
@@ -30,10 +30,10 @@ use std::io::{Error, ErrorKind, Result};
 /// }
 ///
 /// let people: Vec<Person> = fake_it(10);
-/// 
+///
 pub fn fake_it<T>(count: u32) -> Vec<T>
 where
-    T: fake::Dummy<fake::Faker>
+    T: fake::Dummy<fake::Faker>,
 {
     let mut list: Vec<T> = vec![];
 
@@ -162,18 +162,5 @@ where
     match R::deserialize(current_value) {
         Ok(r) => Ok(r),
         Err(e) => Err(Error::new(ErrorKind::InvalidData, e.to_string())),
-    }
-}
-
-pub fn value_map_to_struct<T>(value: Value) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    match value {
-        Value::Map(_) => match T::deserialize(value) {
-            Ok(result) => Ok(result),
-            Err(e) => Err(Error::new(ErrorKind::InvalidData, e.to_string())),
-        },
-        _ => Err(Error::new(ErrorKind::InvalidInput, "Expected a Value::Map")),
     }
 }

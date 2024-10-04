@@ -7,7 +7,7 @@ use fake::Dummy;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
 pub enum Status {
     Pending,
     Completed,
@@ -24,7 +24,7 @@ impl Display for Status {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
 pub struct ToDo {
     pub id: String,
     #[dummy(faker = "Sentence(5..10)")]
@@ -38,14 +38,14 @@ pub struct ToDo {
     pub tags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
 pub struct User {
     pub name: Name,
     #[dummy(faker = "SafeEmail()")]
     pub email: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
 pub struct Name {
     #[dummy(faker = "FirstName()")]
     pub first: String,
@@ -53,7 +53,7 @@ pub struct Name {
     pub last: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Dummy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
 pub struct Date {
     pub start: String,
     pub end: String,

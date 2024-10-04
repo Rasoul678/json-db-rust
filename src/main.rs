@@ -1,15 +1,16 @@
 #![allow(unused_variables)]
 
+use std::collections::HashSet;
 use json_db::{fake_it, Date, JsonDB, Name, Status, ToDo, User};
 
 #[tokio::main]
 async fn main() {
-    let my_db = JsonDB::new("todo").await.unwrap();
+    let mut my_db = JsonDB::new("todo").await.unwrap();
 
     let todos = fake_it::<ToDo>(10);
 
-    for todo in &todos {
-        let _ = my_db.insert(&todo).await;
+    for todo in todos {
+        my_db.insert(todo).run().await.unwrap();
     }
 
     let my_todo = ToDo {
@@ -31,15 +32,18 @@ async fn main() {
         point: 10,
     };
 
-    my_db.insert(&my_todo).await.unwrap();
+    my_db.insert(my_todo).run().await.unwrap_or_else(|e| {
+        println!("Error: {}", e);
+        HashSet::new()
+    });
 
     println!("************\nFound:\n************\n ");
     let found = my_db
         .find()
-        ._where("point")
-        .between([10, 400])
-        ._where("status")
+        .where_("status")
         .equals("Pending")
+        .where_("point")
+        .less_than(300)
         .run()
         .await
         .unwrap();
@@ -47,15 +51,15 @@ async fn main() {
     println!("{:#?}", found);
 
     println!("************\nDeleted:\n************\n");
-    let deleted = my_db
-        .delete()
-        ._where("status")
-        .not_equals("Archived")
-        .run()
-        .await
-        .unwrap();
+    // let deleted = my_db
+    //     .delete()
+    //     .where_("status")
+    //     .not_equals("Archived")
+    //     .run()
+    //     .await
+    //     .unwrap();
 
-    println!("{:#?}", deleted);
+    // println!("{:#?}", deleted);
 
     println!("************\nAll items in db has been deleted! :)\n************\n");
     my_db.delete_all().await.unwrap();
