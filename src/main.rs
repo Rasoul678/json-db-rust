@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use json_db::{fake_it, Date, JsonDB, Name, Status, ToDo, User};
-use std::collections::HashSet;
 
 #[tokio::main]
 async fn main() {
@@ -34,7 +33,7 @@ async fn main() {
 
     my_db.insert(my_todo).run().await.unwrap_or_else(|e| {
         println!("Error: {}", e);
-        HashSet::new()
+        Vec::new()
     });
 
     println!("************\nFound:\n************\n ");
@@ -62,6 +61,9 @@ async fn main() {
         .unwrap();
 
     println!("{:#?}", deleted);
+
+    println!("************\nUpdate:\n************\n");
+    my_db.update().run().await.unwrap();
 
     println!("************\nAll items in db has been deleted! :)\n************\n");
     my_db.delete().run().await.unwrap();

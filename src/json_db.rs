@@ -29,6 +29,44 @@ enum MethodName {
     Delete,
 }
 
+impl MethodName {
+    fn notify(&self, db_name: &str) {
+        let teal = CustomColor::new(0, 201, 217);
+        let gold = CustomColor::new(251, 190, 13);
+        let green = CustomColor::new(8, 171, 112);
+        let yellow = CustomColor::new(242, 140, 54);
+        let red = CustomColor::new(217, 33, 33);
+
+        match self {
+            MethodName::Create(item) => println!(
+                "{lead} {} {trail}\n\n {} \n",
+                db_name.custom_color(gold).bold(),
+                item,
+                lead = "🌱 Creating new record in".custom_color(green).bold(),
+                trail = "table...".custom_color(green).bold()
+            ),
+            MethodName::Read => println!(
+                "{lead} {} {trail}\n",
+                db_name.custom_color(gold).bold(),
+                lead = "🔎 Querying".custom_color(teal).bold(),
+                trail = "table...".custom_color(teal).bold()
+            ),
+            MethodName::Update => println!(
+                "{lead} {} {trail}\n",
+                db_name.custom_color(gold).bold(),
+                lead = "⛁ Updating records in".custom_color(yellow).bold(),
+                trail = "table...".custom_color(yellow).bold()
+            ),
+            MethodName::Delete => println!(
+                "{lead} {} {trail}\n",
+                db_name.custom_color(gold).bold(),
+                lead = "✗ Deleting records from".custom_color(red).bold(),
+                trail = "table...".custom_color(red).bold()
+            ),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 enum Runner {
     Done,
@@ -310,12 +348,13 @@ impl JsonDB {
         self
     }
 
-    /// Adds a `Runner::Compare(Comparator::Between(range))` to the end of the runners queue, filtering the data based on the provided range.
+    /// Adds a `Runner::Compare(Comparator::Between((start, end)))` to the end of the runners queue, filtering the data based on the provided start and end values.
     /// The returned `Self` instance contains the updated runners queue.
     ///
     /// # Arguments
     ///
-    /// * `range` - The range to filter the data by, specified as a tuple of two `u64` values.
+    /// * `start` - The start value to filter the data by.
+    /// * `end` - The end value to filter the data by.
     ///
     /// # Returns
     ///
@@ -330,7 +369,7 @@ impl JsonDB {
     /// Runs the database operations specified in the runners queue.
     ///
     /// This method processes the runners queue, performing various database operations such as creating, reading, updating, and deleting records.
-    /// The method returns the resulting set of `ToDo` items after applying the specified operations.
+    /// The method returns the resulting list of `ToDo` items after applying the specified operations.
     ///
     /// # Errors
     ///
@@ -338,11 +377,12 @@ impl JsonDB {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a `HashSet` of `ToDo` items representing the final state of the database after the operations have been performed.
-    pub async fn run(&mut self) -> Result<HashSet<ToDo>, std::io::Error> {
+    /// A `Result` containing a `Vec` of `ToDo` items representing the final state of the database after the operations have been performed.
+    pub async fn run(&mut self) -> Result<Vec<ToDo>, std::io::Error> {
         let mut result = (*self.value).clone();
         let mut key_chain = String::new();
         let mut method: Option<MethodName> = None;
+
         Arc::make_mut(&mut self.runners).push_back(Runner::Done);
 
         while let Some(runner) = Arc::make_mut(&mut self.runners).pop_front() {
@@ -368,62 +408,23 @@ impl JsonDB {
                         .collect();
                 }
                 Runner::Done => {
-                    let teal = CustomColor::new(0, 201, 217);
-                    let gold = CustomColor::new(251, 190, 13);
-                    let green = CustomColor::new(8, 171, 112);
-                    let yellow = CustomColor::new(242, 140, 54);
-                    let red = CustomColor::new(217, 33, 33);
-
                     match method {
                         Some(MethodName::Read) => {
-                            println!(
-                                "{lead} {} {trail}",
-                                self.name.custom_color(gold).bold(),
-                                lead = "Querying".custom_color(teal).bold(),
-                                trail = "database...".custom_color(teal).bold()
-                            )
+                            MethodName::Read.notify(&self.name);
                         }
                         Some(MethodName::Create(ref new_item)) => {
                             self.insert_into_records(&new_item)?;
-
-                            println!(
-                                "{lead} {} {trail}\n {} \n",
-                                self.name.custom_color(gold).bold(),
-                                new_item,
-                                lead = "Creating new record in".custom_color(green).bold(),
-                                trail = "database...".custom_color(green).bold()
-                            );
+                            MethodName::Create(new_item.clone()).notify(&self.name);
                         }
                         Some(MethodName::Update) => {
-                            println!(
-                                "{lead} {} {middle} {} {trail}",
-                                result.len().to_string().custom_color(teal).bold(),
-                                self.name.custom_color(gold).bold(),
-                                lead = "Updating".custom_color(yellow).bold(),
-                                middle = "records in".custom_color(yellow).bold(),
-                                trail = "database...".custom_color(yellow).bold()
-                            );
+                            MethodName::Update.notify(&self.name);
                         }
-
                         Some(MethodName::Delete) => {
                             for t in result.iter() {
                                 Arc::make_mut(&mut self.value).retain(|todo| todo.id != t.id);
                             }
 
-                            let mut lenght = result.len().to_string();
-
-                            if self.value.is_empty() {
-                                lenght = "all".to_string();
-                            }
-
-                            println!(
-                                "{lead} {} {middle} {} {trail}",
-                                lenght.custom_color(teal).bold(),
-                                self.name.custom_color(gold).bold(),
-                                lead = "Deleting".custom_color(red).bold(),
-                                middle = "records from".custom_color(red).bold(),
-                                trail = "database...".custom_color(red).bold()
-                            );
+                            MethodName::Delete.notify(&self.name);
                         }
                         _ => {}
                     }
@@ -435,9 +436,24 @@ impl JsonDB {
             }
         }
 
-        Ok(result)
+        let result_vec = result.iter().cloned().collect::<Vec<ToDo>>();
+        Ok(result_vec)
     }
 
+    /// Filters a `Value` based on the provided `Comparator`.
+    ///
+    /// This function takes a `Value` and a `Comparator` and returns a boolean indicating whether the `Value` matches the comparison criteria.
+    ///
+    /// # Examples
+    ///
+    /// use serde_json::Value;
+    /// use json_db::Comparator;
+    ///
+    /// let json_db = JsonDB::new();
+    /// let value = Value::from(42u64);
+    /// let comparator = Comparator::GreaterThan(30);
+    /// assert!(json_db.filter_with_conmpare(value, &comparator));
+    ///
     fn filter_with_conmpare(&self, value: Value, comparator: &Comparator) -> bool {
         match comparator {
             Comparator::Equals(v) => value.as_str() == Some(v.as_str()),
@@ -453,6 +469,9 @@ impl JsonDB {
         }
     }
 
+    /// Inserts a new item into the records of the JsonDB.
+    ///
+    /// This method takes a reference to a `ToDo` item and attempts to insert it into the records of the JsonDB. It first checks if the new item already exists in the database by iterating through the existing `ToDo` items and comparing their IDs. If the new item's ID matches an existing item, an `io::Error` with the `ErrorKind::AlreadyExists` error kind is returned. Otherwise, the new item is inserted into the records and a reference to the new item is returned.
     fn insert_into_records<'a>(&mut self, new_item: &'a ToDo) -> Result<&'a ToDo, io::Error> {
         let mut todos = self
             .value

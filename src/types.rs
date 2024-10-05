@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use colored::Colorize;
 use fake::faker::internet::en::SafeEmail;
 use fake::faker::lorem::en::{Sentence, Words};
 use fake::faker::name::en::{FirstName, LastName};
@@ -18,8 +19,20 @@ impl Display for ToDo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{{\n   id: {}\n   status: {}\n   text: \"{}\"\n   point: {}\n   user: {}\n   ...\n }}",
-            self.id, self.status, self.text, self.point, self.user
+            "{}\n   {}: {}\n   {}: {}\n   {}: \"{}\"\n   {}: {}\n   {}: {}\n   {}\n {}",
+            "{".bright_green().bold(),
+            "id".bright_yellow().bold(),
+            self.id.bright_cyan(),
+            "status".bright_yellow().bold(),
+            self.status.to_string().bright_cyan(),
+            "text".bright_yellow().bold(),
+            self.text.bright_cyan(),
+            "point".bright_yellow().bold(),
+            self.point.to_string().bright_cyan(),
+            "user".bright_yellow().bold(),
+            self.user.to_string().bright_cyan(),
+            "...".bright_yellow().bold(),
+            "}".bright_green().bold()
         )
     }
 }
@@ -27,9 +40,9 @@ impl Display for ToDo {
 impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Status::Pending => write!(f, "Status(Pending)"),
-            Status::Completed => write!(f, "Status(Completed)"),
-            Status::Archived => write!(f, "Status(Archived)"),
+            Status::Pending => write!(f, "Status({})", "Pending".bright_purple().bold()),
+            Status::Completed => write!(f, "Status({})", "Completed".bright_green().bold()),
+            Status::Archived => write!(f, "Status({})", "Archived".yellow().bold()),
         }
     }
 }
@@ -59,8 +72,11 @@ impl Display for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{{\n      name: \"{:>}\"\n      email: \"{}\"\n   }}",
-            self.name.first, self.email
+            "{{\n      {}: \"{:>}\"\n      {}: \"{}\"\n   }}",
+            "name".yellow().bold(),
+            self.name.first,
+            "email".yellow().bold(),
+            self.email,
         )
     }
 }
