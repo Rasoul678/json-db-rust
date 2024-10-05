@@ -50,20 +50,39 @@ async fn main() {
     println!("{:#?}", found);
 
     println!("************\nDeleted:\n************\n");
-    let deleted = my_db
-        .delete()
-        .where_("status")
-        .not_equals("Archived")
-        .where_("point")
-        .less_than(500)
-        .run()
-        .await
-        .unwrap();
+    // let deleted = my_db
+    //     .delete()
+    //     .where_("status")
+    //     .not_equals("Archived")
+    //     .where_("point")
+    //     .less_than(500)
+    //     .run()
+    //     .await
+    //     .unwrap();
 
-    println!("{:#?}", deleted);
+    // println!("{:#?}", deleted);
 
     println!("************\nUpdate:\n************\n");
-    my_db.update().run().await.unwrap();
+    let td = ToDo {
+        id: "100".to_string(),
+        text: "Learn Rust".to_string(),
+        status: Status::Pending,
+        user: User {
+            name: Name {
+                first: "Rasoul".to_string(),
+                last: "Hesami Rostami".to_string(),
+            },
+            email: "rasoul.hesami@gmail.com".to_string(),
+        },
+        date: Date {
+            start: "2023-01-01".to_string(),
+            end: "2025-01-01".to_string(),
+        },
+        tags: vec!["rust".to_string(), "programming".to_string()],
+        point: 10,
+    };
+    let updated = my_db.update(td).run().await.unwrap();
+    println!("{:#?}", updated);
 
     println!("************\nAll items in db has been deleted! :)\n************\n");
     my_db.delete().run().await.unwrap();

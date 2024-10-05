@@ -25,7 +25,7 @@ enum Comparator {
 enum MethodName {
     Create(ToDo),
     Read,
-    Update,
+    Update(ToDo),
     Delete,
 }
 
@@ -51,10 +51,11 @@ impl MethodName {
                 lead = "🔎 Querying".custom_color(teal).bold(),
                 trail = "table...".custom_color(teal).bold()
             ),
-            MethodName::Update => println!(
-                "{lead} {} {trail}\n",
+            MethodName::Update(item) => println!(
+                "{lead} {} {trail}\n\n {} \n",
                 db_name.custom_color(gold).bold(),
-                lead = "⛁ Updating records in".custom_color(yellow).bold(),
+                item,
+                lead = "⛁ Updating a record in".custom_color(yellow).bold(),
                 trail = "table...".custom_color(yellow).bold()
             ),
             MethodName::Delete => println!(
@@ -227,8 +228,8 @@ impl JsonDB {
     /// # Returns
     ///
     /// A new `Self` instance with the updated runners queue.
-    pub fn update(&mut self) -> &mut Self {
-        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Update));
+    pub fn update(&mut self, record: ToDo) -> &mut Self {
+        Arc::make_mut(&mut self.runners).push_back(Runner::Method(MethodName::Update(record)));
 
         self
     }
@@ -416,8 +417,39 @@ impl JsonDB {
                             self.insert_into_records(&new_item)?;
                             MethodName::Create(new_item.clone()).notify(&self.name);
                         }
-                        Some(MethodName::Update) => {
-                            MethodName::Update.notify(&self.name);
+                        Some(MethodName::Update(new_todo)) => {
+                            let search_result =
+                                result
+                                    .iter()
+                                    .find(|t| t.id == new_todo.id)
+                                    .ok_or(io::Error::new(
+                                        ErrorKind::NotFound,
+                                        format!(
+                                            "Schade! Record with id \"{}\" not found!",
+                                            new_todo.id
+                                        ),
+                                    ));
+
+                            match search_result {
+                                Ok(old_todo) => {
+                                    MethodName::Update(new_todo.to_owned()).notify(&self.name);
+
+                                    Arc::make_mut(&mut self.value).retain(|t| t.id != old_todo.id);
+                                    Arc::make_mut(&mut self.value).insert(new_todo.clone());
+
+                                    result.clear();
+                                    result.insert(new_todo);
+                                }
+                                Err(err) => {
+                                    println!(
+                                        "{} {}\n{}",
+                                        "Updating error:".bright_red().bold(),
+                                        err.to_string().bright_cyan().bold(),
+                                        "Tipp: Consider adding new record!".bright_green().bold()
+                                    );
+                                    return Err(err);
+                                }
+                            };
                         }
                         Some(MethodName::Delete) => {
                             for t in result.iter() {

@@ -19,7 +19,7 @@ impl Display for ToDo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}\n   {}: {}\n   {}: {}\n   {}: \"{}\"\n   {}: {}\n   {}: {}\n   {}\n {}",
+            "{}\n   {}: {},\n   {}: {},\n   {}: \"{}\",\n   {}: {},\n   {}: {},\n   {}\n {}",
             "{".bright_green().bold(),
             "id".bright_yellow().bold(),
             self.id.bright_cyan(),
@@ -72,9 +72,9 @@ impl Display for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{{\n      {}: \"{:>}\"\n      {}: \"{}\"\n   }}",
+            "{{\n      {}: {},\n      {}: \"{}\",\n   }}",
             "name".yellow().bold(),
-            self.name.first,
+            self.name,
             "email".yellow().bold(),
             self.email,
         )
@@ -87,6 +87,19 @@ pub struct Name {
     pub first: String,
     #[dummy(faker = "LastName()")]
     pub last: String,
+}
+
+impl Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{\n\t{}: \"{}\",\n\t{}: \"{}\",\n      }}",
+            "first".yellow().bold(),
+            self.first,
+            "last".yellow().bold(),
+            self.last,
+        )
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
