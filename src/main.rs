@@ -1,45 +1,41 @@
 #![allow(unused_variables)]
 
-use json_db::{fake_it, Date, JsonDB, Name, Status, ToDo, User};
+use json_db::{fake_it, JsonDB, ToDo};
 
 #[tokio::main]
 async fn main() {
-    let my_db = JsonDB::new("todo").await.unwrap();
+    let mut db = JsonDB::new().await.unwrap();
 
-    let todos = fake_it::<ToDo>(10);
+    db.add_table("product").unwrap();
+
+    let todos = fake_it::<ToDo>(1);
 
     for todo in &todos {
-        let _ = my_db.insert(&todo).await;
+        db.insert_or("person", todo.clone()).run().await.unwrap();
     }
 
-    let my_todo = ToDo {
-        id: "100".to_string(),
-        text: "Learn Rust".to_string(),
-        status: Status::Pending,
-        user: User {
-            name: Name {
-                first: "Rasoul".to_string(),
-                last: "Hesami".to_string(),
-            },
-            email: "rasoul.hesami@gmail.com".to_string(),
-        },
-        date: Date {
-            start: "2023-01-01".to_string(),
-            end: "2025-01-01".to_string(),
-        },
-        tags: vec!["rust".to_string(), "programming".to_string()],
-        point: 10,
-    };
+    let todo = ToDo::default();
 
-    my_db.insert(&my_todo).await.unwrap();
+    db.insert_or("todo", todo.clone())
+        .run()
+        .await
+        .unwrap_or_else(|e| {
+            println!("Error: {}", e);
+            Vec::new()
+        });
+
+    db.insert("todo", todo.clone())
+        .run()
+        .await
+        .unwrap_or(Vec::new());
 
     println!("************\nFound:\n************\n ");
-    let found = my_db
-        .find()
-        ._where("point")
-        .between([10, 400])
-        ._where("status")
+    let found = db
+        .find("todo")
+        .where_("status")
         .equals("Pending")
+        .where_("point")
+        .less_than(500)
         .run()
         .await
         .unwrap();
@@ -47,16 +43,26 @@ async fn main() {
     println!("{:#?}", found);
 
     println!("************\nDeleted:\n************\n");
-    let deleted = my_db
-        .delete()
-        ._where("status")
+    let deleted = db
+        .delete("person")
+        .where_("status")
         .not_equals("Archived")
+        .where_("point")
+        .less_than(500)
         .run()
         .await
         .unwrap();
 
     println!("{:#?}", deleted);
 
+    println!("************\nUpdate:\n************\n");
+    let td = ToDo::default();
+
+    let updated = db.update("todo", td.clone()).run().await.unwrap_or(vec![]);
+    let updated = db.update("person", td).run().await.unwrap_or(vec![]);
+    println!("{:#?}", updated);
+
     println!("************\nAll items in db has been deleted! :)\n************\n");
-    my_db.delete_all().await.unwrap();
+    db.delete("person").run().await.unwrap();
+    db.delete("todo").run().await.unwrap();
 }
