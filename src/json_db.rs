@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use crate::get_nested_value;
-use crate::types::{JsonContent, ToDo};
-use colored::{customcolors::CustomColor, *};
+use crate::types::{Comparator, MethodName, Runner, ToDo};
+use colored::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, ErrorKind};
@@ -10,71 +10,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-#[derive(Clone, PartialEq, Debug)]
-enum Comparator {
-    Equals(String),
-    NotEquals(String),
-    LessThan(u64),
-    GreaterThan(u64),
-    In(Vec<String>),
-    Between((u64, u64)),
-}
-
-#[derive(Clone, PartialEq, Debug)]
-enum MethodName {
-    Create(String, ToDo, bool),
-    Read(String),
-    Update(String, ToDo),
-    Delete(String),
-}
-
-impl MethodName {
-    fn notify(&self) {
-        let teal = CustomColor::new(0, 201, 217);
-        let gold = CustomColor::new(251, 190, 13);
-        let green = CustomColor::new(8, 171, 112);
-        let yellow = CustomColor::new(242, 140, 54);
-        let red = CustomColor::new(217, 33, 33);
-
-        match self {
-            MethodName::Create(table, item, _) => println!(
-                "{lead} {} {trail}\n\n {} \n",
-                table.custom_color(gold).bold(),
-                item,
-                lead = "🌱 Creating a new record in".custom_color(green).bold(),
-                trail = "table...".custom_color(green).bold()
-            ),
-            MethodName::Read(table) => println!(
-                "{lead} {} {trail}\n",
-                table.custom_color(gold).bold(),
-                lead = "🔎 Querying".custom_color(teal).bold(),
-                trail = "table...".custom_color(teal).bold()
-            ),
-            MethodName::Update(table, item) => println!(
-                "{lead} {} {trail}\n\n {} \n",
-                table.custom_color(gold).bold(),
-                item,
-                lead = "⛁ Updating a record in".custom_color(yellow).bold(),
-                trail = "table...".custom_color(yellow).bold()
-            ),
-            MethodName::Delete(table) => println!(
-                "{lead} {} {trail}\n",
-                table.custom_color(gold).bold(),
-                lead = "✗ Deleting records from".custom_color(red).bold(),
-                trail = "table...".custom_color(red).bold()
-            ),
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Debug)]
-enum Runner {
-    Done,
-    Method(MethodName),
-    Compare(Comparator),
-    Where(String),
-}
 
 #[derive(Clone)]
 pub struct JsonDB {
@@ -86,6 +21,16 @@ pub struct JsonDB {
 }
 
 impl JsonDB {
+    /// Creates a new instance of the `JsonDB` struct, initializing it with a new JSON database file.
+    ///
+    /// This function reads the contents of the `db.json` file in the current directory,
+    /// or creates a new file if it doesn't exist. The file contents are deserialized into a `HashMap` and stored in the `JsonDB` struct.
+    /// The `JsonDB` struct also initializes an empty `HashSet` for table names, an `Arc`-wrapped `File` instance, and an empty `VecDeque` for runners.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a new `JsonDB` instance if the operation is successful,
+    /// or an `io::Error` if there is a problem reading or creating the file.
     pub async fn new() -> Result<JsonDB, io::Error> {
         let dir_path = std::env::current_dir()?;
         let file_path = dir_path.join("db.json");
@@ -119,6 +64,16 @@ impl JsonDB {
         Ok(db)
     }
 
+    /// Retrieves a mutable reference to the HashSet of `ToDo` items for the specified table in the JSON database.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name of the table to retrieve the mutable reference for.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a mutable reference to the `HashSet<ToDo>` for the specified table if it exists,
+    /// or an `io::Error` if the table is not found.
     fn get_table_mut(&mut self, table_name: &str) -> Result<&mut HashSet<ToDo>, io::Error> {
         let table = Arc::make_mut(&mut self.value)
             .get_mut(table_name)
@@ -130,7 +85,7 @@ impl JsonDB {
                     table_name.to_string().bright_red().bold(),
                     "table failed!".bright_red().bold(),
                     "✔".bright_green().bold().blink(),
-                    "Tipp: Add a table first!".bright_green().bold()
+                    "Try to add a table first!".bright_green().bold()
                 );
                 io::Error::new(
                     ErrorKind::NotFound,
@@ -141,6 +96,15 @@ impl JsonDB {
         Ok(table)
     }
 
+    /// Retrieves a vector of `ToDo` items from the specified table in the JSON database.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name of the table to retrieve the items from.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<ToDo>` if the table is found, or an `io::Error` if the table is not found.
     fn get_table_vec(&mut self, table_name: &str) -> Result<Vec<ToDo>, io::Error> {
         let hash_table = (*self.value)
             .clone()
@@ -158,7 +122,16 @@ impl JsonDB {
         Ok(table)
     }
 
-    fn add_table(&mut self, table_name: &str) -> Result<(), io::Error> {
+    /// Adds a new table to the JSON database.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name of the table to add.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating whether the table was successfully added. If the table already exists, this function will return `Ok(())`.
+    pub fn add_table(&mut self, table_name: &str) -> Result<(), io::Error> {
         let value = Arc::make_mut(&mut self.value);
 
         if !value.contains_key(table_name) {
@@ -169,6 +142,11 @@ impl JsonDB {
         Ok(())
     }
 
+    /// Saves the current state of the `JsonDb` instance to the file specified by the `path` field.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if there is a problem writing the JSON data to the file.
     pub async fn save(&self) -> Result<(), io::Error> {
         let json = serde_json::to_string_pretty(&*self.value)
             .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
@@ -180,39 +158,6 @@ impl JsonDB {
             .await?;
 
         file.write_all(json.as_bytes()).await?;
-        file.flush().await?;
-
-        Ok(())
-    }
-    async fn read_content(&self) -> Result<JsonContent, io::Error> {
-        let mut file = OpenOptions::new().read(true).open(&self.path).await?;
-        let mut content = String::new();
-        file.read_to_string(&mut content).await?;
-        let json_data: JsonContent = serde_json::from_str(&content)?;
-        Ok(json_data)
-    }
-    async fn save_content(&self, content: JsonContent) -> Result<(), io::Error> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&self.path)
-            .await?;
-        file.write_all(serde_json::to_string_pretty(&content)?.as_bytes())
-            .await?;
-        file.flush().await?;
-        Ok(())
-    }
-
-    async fn clear(&self) -> Result<(), io::Error> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&self.path)
-            .await?;
-
-        file.write_all(b"").await?;
-
         file.flush().await?;
 
         Ok(())
@@ -255,42 +200,6 @@ impl JsonDB {
             true,
         )));
         self
-    }
-
-    pub async fn get_all(&self) -> Result<Vec<ToDo>, io::Error> {
-        let content = self.read_content().await?;
-        Ok(content.records)
-    }
-
-    /// Updates an existing record in the JSON database.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - The ID of the record to update.
-    /// * `todo` - The updated `ToDo` item.
-    ///
-    /// # Returns
-    ///
-    /// The updated `ToDo` item if the operation was successful, or an `io::Error` if the record was not found or there was an error.
-    pub async fn update_todo(&self, id: &str, todo: ToDo) -> Result<ToDo, io::Error> {
-        let mut content = self.read_content().await?;
-        let todo_index = content
-            .records
-            .iter()
-            .position(|todo| todo.id == id)
-            .ok_or(io::Error::new(ErrorKind::NotFound, "Record not found"))?;
-        content.records[todo_index] = todo.clone();
-        self.save_content(content).await?;
-        Ok(todo)
-    }
-
-    /// Removes all records from the JSON database.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` that is `Ok(())` if the operation was successful, or an `Err(io::Error)` if there was an error.
-    pub async fn delete_all(&self) -> Result<(), io::Error> {
-        self.clear().await
     }
 
     /// Adds a `Runner::Method(MethodName::Read)` to the end of the runners queue, indicating that the current operation is a read operation.
@@ -483,8 +392,13 @@ impl JsonDB {
                         result = self.get_table_vec(&table).unwrap_or_default();
                         method = Some(MethodName::Read(table));
                     }
-                    _ => {
-                        method = Some(name);
+                    MethodName::Delete(table) => {
+                        result = self.get_table_vec(&table).unwrap_or_default();
+                        method = Some(MethodName::Delete(table));
+                    }
+                    MethodName::Update(table, new_item) => {
+                        result = self.get_table_vec(&table).unwrap_or_default();
+                        method = Some(MethodName::Update(table, new_item));
                     }
                 },
                 Runner::Where(f) => {
@@ -508,44 +422,52 @@ impl JsonDB {
                             self.insert_into_table(table.as_str(), &new_item, or)?;
                             MethodName::Create(table, new_item.clone(), or).notify();
                         }
-                        Some(MethodName::Update(table, new_todo)) => {
-                            // let search_result =
-                            //     result
-                            //         .iter()
-                            //         .find(|t| t.id == new_todo.id)
-                            //         .ok_or(io::Error::new(
-                            //             ErrorKind::NotFound,
-                            //             format!(
-                            //                 "Schade! Record with id \"{}\" not found!",
-                            //                 new_todo.id
-                            //             ),
-                            //         ));
+                        Some(MethodName::Update(table, new_item)) => {
+                            let search_result =
+                                result
+                                    .iter()
+                                    .find(|t| t.id == new_item.id)
+                                    .ok_or(io::Error::new(
+                                        ErrorKind::NotFound,
+                                        format!(
+                                            "Schade! Record with id \"{}\" not found in table {}",
+                                            new_item.id,
+                                            table.bright_cyan().bold()
+                                        ),
+                                    ));
 
-                            // match search_result {
-                            //     Ok(old_todo) => {
-                            //         MethodName::Update(new_todo.to_owned()).notify(&self.name);
+                            match search_result {
+                                Ok(old_todo) => {
+                                    let table_hash = self.get_table_mut(&table)?;
 
-                            //         Arc::make_mut(&mut self.value).retain(|t| t.id != old_todo.id);
-                            //         Arc::make_mut(&mut self.value).insert(new_todo.clone());
+                                    table_hash.retain(|t| t.id != old_todo.id);
+                                    table_hash.insert(new_item.clone());
 
-                            //         result.clear();
-                            //         result.insert(new_todo);
-                            //     }
-                            //     Err(err) => {
-                            //         println!(
-                            //             "{} {}\n{}",
-                            //             "Updating error:".bright_red().bold(),
-                            //             err.to_string().bright_cyan().bold(),
-                            //             "Tipp: Consider adding new record!".bright_green().bold()
-                            //         );
-                            //         return Err(err);
-                            //     }
-                            // };
+                                    result.clear();
+                                    result.push(new_item.clone());
+
+                                    MethodName::Update(table, new_item.to_owned()).notify();
+                                }
+
+                                Err(err) => {
+                                    println!(
+                                        "{}  {} {}\n\t\t{} {}\n",
+                                        "(update_table)".bright_cyan().bold(),
+                                        "✗".bright_red().bold(),
+                                        err.to_string().bright_red().bold(),
+                                        "✔".bright_green().bold().blink(),
+                                        "Consider adding new record".bright_green().bold()
+                                    );
+                                    return Err(err);
+                                }
+                            };
                         }
                         Some(MethodName::Delete(table)) => {
-                            // for t in result.iter() {
-                            //     Arc::make_mut(&mut self.value).retain(|todo| todo.id != t.id);
-                            // }
+                            let table_hash = self.get_table_mut(&table)?;
+
+                            for t in result.iter() {
+                                table_hash.retain(|todo| todo.id != t.id);
+                            }
 
                             MethodName::Delete(table).notify();
                         }
@@ -559,7 +481,6 @@ impl JsonDB {
             }
         }
 
-        // let result_vec = result.iter().cloned().collect::<Vec<ToDo>>();
         Ok(result)
     }
 
@@ -592,9 +513,23 @@ impl JsonDB {
         }
     }
 
-    /// Inserts a new item into the records of the JsonDB.
+    
+    /// Inserts a new item into a table in the JSON database.
     ///
-    /// This method takes a reference to a `ToDo` item and attempts to insert it into the records of the JsonDB. It first checks if the new item already exists in the database by iterating through the existing `ToDo` items and comparing their IDs. If the new item's ID matches an existing item, an `io::Error` with the `ErrorKind::AlreadyExists` error kind is returned. Otherwise, the new item is inserted into the records and a reference to the new item is returned.
+    /// This function takes a table name, a new item to insert,
+    /// and a boolean flag indicating whether to create the table if it doesn't exist.
+    /// If the new item already exists in the table, either by exact properties or by ID, an error is returned.
+    /// Otherwise, the new item is inserted into the table and a reference to the inserted item is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - The name of the table to insert the new item into.
+    /// * `new_item` - The new item to insert into the table.
+    /// * `or` - A boolean flag indicating whether to create the table if it doesn't exist.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<&'a ToDo, io::Error>` - A result containing either a reference to the inserted item or an error if the item already exists.
     fn insert_into_table<'a>(
         &mut self,
         table_name: &str,
@@ -618,16 +553,37 @@ impl JsonDB {
 
         // Check if the new item already exists in the set for exact same properties
         if table.contains(new_item) {
+            println!(
+                "{} {}{}{} {}\n\t\t    {} {}\n",
+                "(insert_into_table)".bright_cyan().bold(),
+                "✗ Schade! Record with id \"".bright_red().bold(),
+                new_item.id.bright_red().bold(),
+                "\" already exists in table".bright_red().bold(),
+                table_name.to_string().bright_cyan().bold(),
+                "✔".bright_green().bold().blink(),
+                "Try to add new record".bright_green().bold()
+            );
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "Record already exists",
             ));
         }
 
-        // TODO: check for double entries with same id
+        // Check for double entries with same id
+        let search_table = table.iter().find(|t| t.id == new_item.id);
 
-        // Insert the new item
-        table.insert(new_item.clone());
+        match search_table {
+            Some(t) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("Record with id \"{}\" already exists", t.id),
+                ));
+            }
+            None => {
+                // Insert the new item
+                table.insert(new_item.clone());
+            }
+        }
 
         Ok(new_item)
     }
