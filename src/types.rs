@@ -8,10 +8,11 @@ use fake::Dummy;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash, Default)]
 pub enum Status {
     Pending,
     Completed,
+    #[default]
     Archived,
 }
 
@@ -61,7 +62,30 @@ pub struct ToDo {
     pub tags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
+impl Default for ToDo {
+    fn default() -> Self {
+        Self {
+            id: "1".to_string(),
+            text: "Learn Rust".to_string(),
+            status: Status::Pending,
+            user: User {
+                name: Name {
+                    first: "John".to_string(),
+                    last: "Doe".to_string(),
+                },
+                email: "admin@gmail.com".to_string(),
+            },
+            date: Date {
+                start: "2024-01-01".to_string(),
+                end: "2025-01-01".to_string(),
+            },
+            tags: vec!["rust".to_string(), "programming".to_string()],
+            point: 100,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash, Default)]
 pub struct User {
     pub name: Name,
     #[dummy(faker = "SafeEmail()")]
@@ -81,7 +105,7 @@ impl Display for User {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash, Default)]
 pub struct Name {
     #[dummy(faker = "FirstName()")]
     pub first: String,
@@ -102,7 +126,7 @@ impl Display for Name {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Dummy, Eq, Hash, Default)]
 pub struct Date {
     pub start: String,
     pub end: String,
