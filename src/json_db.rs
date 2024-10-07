@@ -132,10 +132,10 @@ impl JsonDB {
     ///
     /// A `Result` indicating whether the table was successfully added. If the table already exists, this function will return `Ok(())`.
     pub fn add_table(&mut self, table_name: &str) -> Result<(), io::Error> {
-        let value = Arc::make_mut(&mut self.value);
+        let db_hash = Arc::make_mut(&mut self.value);
 
-        if !value.contains_key(table_name) {
-            value.insert(table_name.to_string(), HashSet::new());
+        if !db_hash.contains_key(table_name) {
+            db_hash.insert(table_name.to_string(), HashSet::new());
             self.tables.insert(table_name.to_string());
         }
 
@@ -148,7 +148,7 @@ impl JsonDB {
     ///
     /// This function will return an error if there is a problem writing the JSON data to the file.
     pub async fn save(&self) -> Result<(), io::Error> {
-        let json = serde_json::to_string_pretty(&*self.value)
+        let json_string = serde_json::to_string_pretty(&*self.value)
             .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
 
         let mut file = OpenOptions::new()
@@ -157,7 +157,7 @@ impl JsonDB {
             .open(&self.path)
             .await?;
 
-        file.write_all(json.as_bytes()).await?;
+        file.write_all(json_string.as_bytes()).await?;
         file.flush().await?;
 
         Ok(())
