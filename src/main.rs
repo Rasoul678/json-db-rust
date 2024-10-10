@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use json_db::{fake_it, JsonDB, ToDo};
+use ohmydb::{fake_it, JsonDB, ToDo};
 
 #[tokio::main]
 async fn main() {

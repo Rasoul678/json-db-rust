@@ -181,11 +181,7 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 name = "json-db"
 version = "0.1.0"
 dependencies = [
- "colored",
- "fake",
- "serde",
- "serde-value",
- "serde_json",
+ "ohmydb",
  "tokio",
 ]
 
@@ -254,6 +250,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "084f1a5821ac4c651660a94a7153d27ac9d8a53736203f58b31945ded098070a"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "ohmydb"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98ad3d10462fc77b0ed8e3f9b8dd6546117a6bbffd30dd5cc620e37893ad2655"
+dependencies = [
+ "colored",
+ "fake",
+ "serde",
+ "serde-value",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
