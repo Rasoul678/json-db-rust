@@ -1,0 +1,35 @@
+{
+  "todo": [
+    {
+      "id": "",
+      "title": "",
+      "status": "",
+      "point": 0,
+      "name": ""
+    }
+  ],
+  "product": [],
+  "person": [
+    {
+      "id": "3",
+      "title": "Buy eggs",
+      "status": "Pending",
+      "point": 300,
+      "name": "John"
+    },
+    {
+      "id": "2",
+      "title": "Buy bread",
+      "status": "Pending",
+      "point": 200,
+      "name": "John"
+    },
+    {
+      "id": "1",
+      "title": "Buy milk",
+      "status": "Pending",
+      "point": 100,
+      "name": "John"
+    }
+  ]
+}
